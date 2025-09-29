@@ -132,7 +132,7 @@ services:
       --maxmemory-policy allkeys-lru
       --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "--auth", "${REDIS_PASS}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASS} ping | grep PONG"]
       interval: 30s
       timeout: 10s
       retries: 3
