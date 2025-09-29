@@ -1,6 +1,3 @@
-📋 README.md - Complete File (พร้อม Copy ทั้งหมด)
-markdown# OneStack 🚀
-
 [English](#english) | [ภาษาไทย](#thai)
 
 <div align="center">
@@ -66,7 +63,7 @@ markdown# OneStack 🚀
 #### Installation
 ```bash
 # 1. Clone repository
-git clone https://github.com/yourusername/onestack.git
+git clone https://github.com/6amdev/onestack.git
 cd onestack
 
 # 2. Run installer
@@ -246,7 +243,7 @@ Port 80, 443 ว่าง
 
 การติดตั้ง
 bash# 1. Clone repository
-git clone https://github.com/yourusername/onestack.git
+git clone https://github.com/6amdev/onestack.git
 cd onestack
 
 # 2. รันตัวติดตั้ง
@@ -405,10 +402,10 @@ Nginx - Web server
     <em>Deploy before breakfast / Deploy ก่อนอาหารเช้า 🌅</em>
   </p>
   <p>
-    <a href="https://github.com/yourusername/onestack/stargazers">⭐ Star this project</a> •
-    <a href="https://github.com/yourusername/onestack/fork">🍴 Fork</a> •
-    <a href="https://github.com/yourusername/onestack/issues">🐛 Report Bug</a> •
-    <a href="https://github.com/yourusername/onestack/issues">✨ Request Feature</a>
+    <a href="https://github.com/6amdev/onestack/stargazers">⭐ Star this project</a> •
+    <a href="https://github.com/6amdev/onestack/fork">🍴 Fork</a> •
+    <a href="https://github.com/6amdev/onestack/issues">🐛 Report Bug</a> •
+    <a href="https://github.com/6amdev/onestack/issues">✨ Request Feature</a>
   </p>
 </div>
 ```
