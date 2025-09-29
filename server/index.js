@@ -21,19 +21,19 @@ const config = {
   // Cloud Code
   cloud: './cloud/main.js',
   
-  // Live Query
-  liveQuery: {
-    classNames: ['Message', 'Notification'],
-    redisURL: process.env.REDIS_URL
-  },
+  // Live Query (ปิดไว้ก่อน)
+  // liveQuery: {
+  //   classNames: ['Message', 'Notification'],
+  //   redisURL: process.env.REDIS_URL
+  // },
   
-  // Cache
-  cacheAdapter: {
-    module: 'parse-server/lib/Adapters/Cache/RedisCacheAdapter',
-    options: {
-      url: process.env.REDIS_URL
-    }
-  },
+  // Cache (ปิดไว้ก่อน)
+  // cacheAdapter: {
+  //   module: 'parse-server/lib/Adapters/Cache/RedisCacheAdapter',
+  //   options: {
+  //     url: process.env.REDIS_URL
+  //   }
+  // },
   
   // Logs
   logsFolder: '/app/logs',
