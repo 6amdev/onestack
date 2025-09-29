@@ -11,9 +11,9 @@ echo -e "${RED}   OneStack Complete Removal   ${NC}"
 echo -e "${RED}================================${NC}"
 
 # Confirmation
-echo -e "${YELLOW}⚠️  This will remove:${NC}"
+echo -e "${YELLOW}⚠️  WARNING: This will remove:${NC}"
 echo "  - All OneStack containers"
-echo "  - All OneStack data"
+echo "  - All OneStack data (PERMANENT!)"
 echo "  - All OneStack volumes"
 echo "  - All OneStack networks"
 echo ""
@@ -24,28 +24,40 @@ if [ "$confirm" != "yes" ]; then
     exit 0
 fi
 
-echo -e "${YELLOW}Removing OneStack...${NC}"
+echo -e "${YELLOW}Stopping OneStack...${NC}"
 
 # Stop and remove containers
-docker-compose down
+docker-compose down -v  # -v จะลบ volumes ที่ประกาศใน docker-compose
 
-# Remove volumes (THIS DELETES ALL DATA!)
-docker volume rm onestack_mongo onestack_redis 2>/dev/null
+# Remove volumes (ชื่อต้องตรงกับใน docker-compose.yml)
+echo -e "${YELLOW}Removing volumes...${NC}"
+docker volume rm onestack_mongo_data 2>/dev/null || true
+docker volume rm onestack_redis_data 2>/dev/null || true
 
-# Remove network
-docker network rm onestack_network 2>/dev/null
+# Remove networks
+echo -e "${YELLOW}Removing networks...${NC}"
+docker network rm onestack_public 2>/dev/null || true
+docker network rm onestack_internal 2>/dev/null || true
 
 # Remove images (optional)
 read -p "Remove Docker images too? (y/n): " remove_images
 if [ "$remove_images" = "y" ]; then
-    docker rmi parseplatform/parse-server:6.4.0
-    docker rmi parseplatform/parse-dashboard:5.3.3
-    docker rmi mongo:7.0
-    docker rmi redis:7-alpine
+    echo -e "${YELLOW}Removing images...${NC}"
+    docker rmi parseplatform/parse-dashboard:latest 2>/dev/null || true
+    docker rmi mongo:7.0 2>/dev/null || true
+    docker rmi redis:7-alpine 2>/dev/null || true
+    docker rmi nginx:alpine 2>/dev/null || true
+    # Remove local build
+    docker rmi onestack-parse-server 2>/dev/null || true
 fi
 
 # Clean up files
+echo -e "${YELLOW}Cleaning up files...${NC}"
 rm -f .env
+rm -f install.info
+rm -rf data/
+rm -rf logs/
+rm -rf backups/
 
 echo -e "${GREEN}✅ OneStack has been completely removed!${NC}"
-echo -e "${YELLOW}Note: The project files are still here. Delete this folder to remove everything.${NC}"
+echo -e "${YELLOW}Note: Project source files still remain. Run 'rm -rf onestack' to delete everything.${NC}"
