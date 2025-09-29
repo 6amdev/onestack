@@ -64,3 +64,14 @@
 
 #### Installation
 ```bash
+# 1. Clone repository
+git clone https://github.com/yourusername/onestack.git
+cd onestack
+
+# 2. Run installer
+chmod +x install.sh
+./install.sh
+
+# 3. Access your services
+# API: http://your-server-ip/parse
+# Dashboard: http://your-server-ip/dashboard
