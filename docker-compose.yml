@@ -76,32 +76,33 @@ services:
       redis:
         condition: service_healthy
 
-    dashboard:
-      image: parseplatform/parse-dashboard:latest
-      container_name: onestack_dashboard
-      restart: unless-stopped
-      networks:
-        - internal
-      ports:
-        - "4040:4040"  # เปิด port ชั่วคราวเพื่อ debug
-      environment:
-        - PARSE_DASHBOARD_ALLOW_INSECURE_HTTP=true
-        - PARSE_DASHBOARD_SERVER_URL=http://parse-server:1337/parse
-        - PARSE_DASHBOARD_APP_ID=${APP_ID}
-        - PARSE_DASHBOARD_MASTER_KEY=${MASTER_KEY}
-        - PARSE_DASHBOARD_APP_NAME=OneStack
-        - PARSE_DASHBOARD_USER_ID=admin
-        - PARSE_DASHBOARD_USER_PASSWORD=${DASHBOARD_PASS}
-      command: >
-        parse-dashboard
-        --dev
-        --appId ${APP_ID}
-        --masterKey ${MASTER_KEY}
-        --serverURL http://parse-server:1337/parse
-        --appName OneStack
-        --allowInsecureHTTP
-      depends_on:
-        - parse-server
+  # Dashboard แยกออกมาเป็น service ของตัวเอง
+  dashboard:
+    image: parseplatform/parse-dashboard:latest
+    container_name: onestack_dashboard
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "4040:4040"  # เปิด port ชั่วคราวเพื่อ debug
+    environment:
+      - PARSE_DASHBOARD_ALLOW_INSECURE_HTTP=true
+      - PARSE_DASHBOARD_SERVER_URL=http://parse-server:1337/parse
+      - PARSE_DASHBOARD_APP_ID=${APP_ID}
+      - PARSE_DASHBOARD_MASTER_KEY=${MASTER_KEY}
+      - PARSE_DASHBOARD_APP_NAME=OneStack
+      - PARSE_DASHBOARD_USER_ID=admin
+      - PARSE_DASHBOARD_USER_PASSWORD=${DASHBOARD_PASS}
+    command: >
+      parse-dashboard
+      --dev
+      --appId ${APP_ID}
+      --masterKey ${MASTER_KEY}
+      --serverURL http://parse-server:1337/parse
+      --appName OneStack
+      --allowInsecureHTTP
+    depends_on:
+      - parse-server
 
   # ======================
   # DATA LAYER
