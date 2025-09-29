@@ -83,6 +83,7 @@ services:
     restart: unless-stopped
     networks:
       - internal
+      - public
     ports:
       - "4040:4040"
     environment:
