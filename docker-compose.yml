@@ -125,14 +125,9 @@ services:
       - internal
     volumes:
       - redis_data:/data
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASS}
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
