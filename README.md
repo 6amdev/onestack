@@ -65,42 +65,14 @@
 
 #### Installation
 ```bash
-
-1. Clone repository
+# 1. Clone repository
 git clone https://github.com/yourusername/onestack.git
-cd onestack2. Run installer
+cd onestack
+
+# 2. Run installer
 chmod +x install.sh
-./install.sh3. Access your services
-API: http://your-server-ip/parse
-Dashboard: http://your-server-ip/dashboard
+./install.sh
 
-That's it! Your backend is ready. 🎉
-
-### 🏗️ Architecture┌─────────────────┐
-│         External Clients            │
-│   (Web, Mobile, IoT, Postman)       │
-└──────────────┬──────────────────────┘
-│ HTTPS/WSS
-┌──────────────▼──────────────────────┐
-│      Nginx (Reverse Proxy)          │
-│   • SSL Termination                 │
-│   • Load Balancing                  │
-│   • Rate Limiting                   │
-└──────────────┬──────────────────────┘
-│ Internal Network
-┌──────────────▼──────────────────────┐
-│        Parse Platform               │
-├─────────────────────────────────────┤
-│  Parse Server │ Dashboard │ Custom  │
-│  • REST API   │ • Admin UI│ Services│
-│  • GraphQL    │ • Analytics│        │
-│  • Live Query │           │         │
-└──────────────┬──────────────────────┘
-│ Isolated Network
-┌──────────────▼──────────────────────┐
-│         Data Layer                  │
-├─────────────────────────────────────┤
-│   MongoDB    │    Redis             │
-│  • Database  │  • Cache             │
-│  • GridFS    │  • Sessions          │
-└─────────────────────────────────────┘
+# 3. Access your services
+# API: http://your-server-ip/parse
+# Dashboard: http://your-server-ip/dashboard
