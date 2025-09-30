@@ -1,6 +1,142 @@
+# version: '3.8'
+
+# # Networks
+# networks:
+#   public:
+#     driver: bridge
+#   internal:
+#     driver: bridge
+#     internal: true
+
+# # Volumes
+# volumes:
+#   mongo_data:
+#     driver: local
+#   redis_data:
+#     driver: local
+
+# # Services
+# services:
+#   # ======================
+#   # GATEWAY LAYER
+#   # ======================
+#   nginx:
+#     image: nginx:alpine
+#     container_name: onestack_nginx
+#     restart: unless-stopped
+#     networks:
+#       - public
+#       - internal
+#     ports:
+#       - "80:80"
+#       - "443:443"
+#     volumes:
+#       - ./configs/nginx:/etc/nginx/conf.d:ro
+#       - ./data/ssl:/etc/nginx/ssl:ro
+#       - ./logs/nginx:/var/log/nginx
+#     depends_on:
+#       - parse-server
+#     healthcheck:
+#       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+
+#   # ======================
+#   # APPLICATION LAYER
+#   # ======================
+#   parse-server:
+#     build: ./server
+#     container_name: onestack_parse
+#     restart: unless-stopped
+#     networks:
+#       - internal
+#     volumes:
+#       - ./server:/app
+#       - ./logs/parse:/app/logs
+#     environment:
+#       NODE_ENV: ${NODE_ENV:-production}
+#       APP_ID: ${APP_ID}
+#       MASTER_KEY: ${MASTER_KEY}
+#       DATABASE_URI: mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/${MONGO_DB}?authSource=admin
+#       REDIS_URL: redis://:${REDIS_PASS}@redis:6379/0
+#       SERVER_URL: ${SERVER_URL:-http://localhost:1337/parse}
+#       # Security
+#       PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: "false"
+#       PARSE_SERVER_ENABLE_ANON_USERS: "false"
+#       PARSE_SERVER_ALLOW_ORIGIN: "*"
+#     healthcheck:
+#       test: ["CMD", "curl", "-f", "http://localhost:1337/parse/health"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+#     depends_on:
+#       mongodb:
+#         condition: service_healthy
+#       redis:
+#         condition: service_healthy
+
+#   # Dashboard แยกออกมาเป็น service ของตัวเอง
+#   dashboard:
+#     image: parseplatform/parse-dashboard:5.2.0
+#     container_name: onestack_dashboard
+#     restart: unless-stopped
+#     networks:
+#       - internal
+#       - public
+#     ports:
+#       - "4040:4040"
+#     environment:
+#       PARSE_DASHBOARD_ALLOW_INSECURE_HTTP: "true"
+#       PARSE_DASHBOARD_SERVER_URL: "http://parse-server:1337/parse"
+#       PARSE_DASHBOARD_APP_ID: "${APP_ID}"
+#       PARSE_DASHBOARD_MASTER_KEY: "${MASTER_KEY}"
+#       PARSE_DASHBOARD_APP_NAME: "OneStack"
+#     depends_on:
+#       - parse-server
+
+#   # ======================
+#   # DATA LAYER
+#   # ======================
+#   mongodb:
+#     image: mongo:7.0
+#     container_name: onestack_mongodb
+#     restart: unless-stopped
+#     networks:
+#       - internal
+#     volumes:
+#       - mongo_data:/data/db
+#       - ./backups/mongo:/backup
+#     environment:
+#       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+#       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS}
+#       MONGO_INITDB_DATABASE: ${MONGO_DB}
+#     command: mongod --auth --bind_ip_all
+#     healthcheck:
+#       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+#       interval: 30s
+#       timeout: 10s
+#       retries: 5
+#       start_period: 40s
+
+#   redis:
+#     image: redis:7-alpine
+#     container_name: onestack_redis
+#     restart: unless-stopped
+#     networks:
+#       - internal
+#     volumes:
+#       - redis_data:/data
+#     healthcheck:
+#       test: ["CMD", "redis-cli", "ping"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#       start_period: 30s
+
+
 version: '3.8'
 
-# Networks
 networks:
   public:
     driver: bridge
@@ -8,18 +144,14 @@ networks:
     driver: bridge
     internal: true
 
-# Volumes
 volumes:
   mongo_data:
     driver: local
   redis_data:
     driver: local
 
-# Services
 services:
-  # ======================
-  # GATEWAY LAYER
-  # ======================
+  # Gateway Layer
   nginx:
     image: nginx:alpine
     container_name: onestack_nginx
@@ -36,68 +168,45 @@ services:
       - ./logs/nginx:/var/log/nginx
     depends_on:
       - parse-server
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - dashboard
 
-  # ======================
-  # APPLICATION LAYER
-  # ======================
+  # Application Layer
   parse-server:
     build: ./server
     container_name: onestack_parse
     restart: unless-stopped
     networks:
       - internal
-    volumes:
-      - ./server:/app
-      - ./logs/parse:/app/logs
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       APP_ID: ${APP_ID}
       MASTER_KEY: ${MASTER_KEY}
       DATABASE_URI: mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/${MONGO_DB}?authSource=admin
-      REDIS_URL: redis://:${REDIS_PASS}@redis:6379/0
       SERVER_URL: ${SERVER_URL:-http://localhost:1337/parse}
-      # Security
       PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: "false"
       PARSE_SERVER_ENABLE_ANON_USERS: "false"
       PARSE_SERVER_ALLOW_ORIGIN: "*"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:1337/parse/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     depends_on:
       mongodb:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-  # Dashboard แยกออกมาเป็น service ของตัวเอง
   dashboard:
     image: parseplatform/parse-dashboard:5.2.0
     container_name: onestack_dashboard
     restart: unless-stopped
     networks:
       - internal
-      - public
-    ports:
-      - "4040:4040"
+    volumes:
+      - ./configs/dashboard/parse-dashboard-config.json:/src/Parse-Dashboard/parse-dashboard-config.json
     environment:
       PARSE_DASHBOARD_ALLOW_INSECURE_HTTP: "true"
-      PARSE_DASHBOARD_SERVER_URL: "http://parse-server:1337/parse"
-      PARSE_DASHBOARD_APP_ID: "${APP_ID}"
-      PARSE_DASHBOARD_MASTER_KEY: "${MASTER_KEY}"
-      PARSE_DASHBOARD_APP_NAME: "OneStack"
+    command: parse-dashboard --config /src/Parse-Dashboard/parse-dashboard-config.json --allowInsecureHTTP
     depends_on:
       - parse-server
 
-  # ======================
-  # DATA LAYER
-  # ======================
+  # Data Layer
   mongodb:
     image: mongo:7.0
     container_name: onestack_mongodb

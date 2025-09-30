@@ -4,36 +4,21 @@ const path = require('path');
 
 const app = express();
 
-// Parse Server Configuration
 const config = {
   databaseURI: process.env.DATABASE_URI,
   appId: process.env.APP_ID,
   masterKey: process.env.MASTER_KEY,
-  serverURL: process.env.SERVER_URL,
+  serverURL: process.env.SERVER_URL || 'http://localhost:1337/parse',
   
   // Security
-  allowClientClassCreation: false,
-  enableAnonymousUsers: false,
+  allowClientClassCreation: process.env.PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION === 'true',
+  enableAnonymousUsers: process.env.PARSE_SERVER_ENABLE_ANON_USERS === 'true',
   
   // CORS
   allowOrigin: process.env.PARSE_SERVER_ALLOW_ORIGIN || '*',
   
-  // Cloud Code
+  // Cloud Code (optional)
   cloud: './cloud/main.js',
-  
-  // Live Query (ปิดไว้ก่อน)
-  // liveQuery: {
-  //   classNames: ['Message', 'Notification'],
-  //   redisURL: process.env.REDIS_URL
-  // },
-  
-  // Cache (ปิดไว้ก่อน)
-  // cacheAdapter: {
-  //   module: 'parse-server/lib/Adapters/Cache/RedisCacheAdapter',
-  //   options: {
-  //     url: process.env.REDIS_URL
-  //   }
-  // },
   
   // Logs
   logsFolder: '/app/logs',
@@ -60,9 +45,4 @@ const httpServer = require('http').createServer(app);
 
 httpServer.listen(PORT, () => {
   console.log(`🚀 OneStack Parse Server running on port ${PORT}`);
-});
-
-// Live Query Server
-ParseServer.createLiveQueryServer(httpServer, {
-  redisURL: process.env.REDIS_URL
 });

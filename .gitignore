@@ -1,0 +1,19 @@
+# Environment
+.env
+install.info
+
+# Data
+data/
+logs/
+backups/
+
+# Generated configs
+configs/dashboard/parse-dashboard-config.json
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

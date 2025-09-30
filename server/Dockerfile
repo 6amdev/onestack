@@ -21,19 +21,39 @@
 # CMD ["node", "index.js"]
 
 
+# FROM node:18-alpine
+
+# WORKDIR /app
+
+# # Copy package.json
+# COPY package.json ./
+
+# # Install dependencies
+# RUN npm install
+
+# # Copy application files
+# COPY index.js ./
+# COPY cloud ./cloud
+
+# # Create logs directory
+# RUN mkdir -p /app/logs
+
+# EXPOSE 1337
+
+# CMD ["node", "index.js"]
+
 FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package.json
-COPY package.json ./
+# Copy package files
+COPY package*.json ./
 
 # Install dependencies
 RUN npm install
 
 # Copy application files
-COPY index.js ./
-COPY cloud ./cloud
+COPY . .
 
 # Create logs directory
 RUN mkdir -p /app/logs

@@ -26,14 +26,14 @@ if [[ $EUID -eq 0 ]]; then
 fi
 
 # Check system
-echo -e "${GREEN}[1/7] System Check...${NC}"
+echo -e "${GREEN}[1/8] System Check...${NC}"
 if [[ "$OSTYPE" != "linux-gnu"* ]]; then
     echo -e "${RED}Error: This script requires Linux${NC}"
     exit 1
 fi
 
 # Check Docker
-echo -e "${GREEN}[2/7] Checking Docker...${NC}"
+echo -e "${GREEN}[2/8] Checking Docker...${NC}"
 if ! command -v docker &> /dev/null; then
     echo "Installing Docker..."
     curl -fsSL https://get.docker.com | sh
@@ -43,7 +43,7 @@ else
 fi
 
 # Check Docker Compose
-echo -e "${GREEN}[3/7] Checking Docker Compose...${NC}"
+echo -e "${GREEN}[3/8] Checking Docker Compose...${NC}"
 if ! command -v docker-compose &> /dev/null; then
     echo "Installing Docker Compose..."
     sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
@@ -54,7 +54,7 @@ else
 fi
 
 # Generate secure passwords
-echo -e "${GREEN}[4/7] Generating secure configuration...${NC}"
+echo -e "${GREEN}[4/8] Generating secure configuration...${NC}"
 generate_password() {
     openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
 }
@@ -82,29 +82,69 @@ if [ ! -f .env ]; then
     echo -e "${GREEN}✓ Configuration generated${NC}"
 else
     echo -e "${YELLOW}✓ Using existing .env file${NC}"
+    # Load existing values
+    source .env
 fi
 
+# Generate Dashboard config
+echo -e "${GREEN}[5/8] Generating Dashboard configuration...${NC}"
+mkdir -p configs/dashboard
+
+# Read values from .env if not already loaded
+[ -z "$APP_ID" ] && source .env
+
+cat > configs/dashboard/parse-dashboard-config.json << EOF
+{
+  "apps": [
+    {
+      "serverURL": "http://parse-server:1337/parse",
+      "appId": "$APP_ID",
+      "masterKey": "$MASTER_KEY",
+      "appName": "OneStack"
+    }
+  ],
+  "users": [
+    {
+      "user": "admin",
+      "pass": "$DASHBOARD_PASS"
+    }
+  ]
+}
+EOF
+echo -e "${GREEN}✓ Dashboard config generated${NC}"
+
 # Create directories
-echo -e "${GREEN}[5/7] Creating directories...${NC}"
+echo -e "${GREEN}[6/8] Creating directories...${NC}"
 mkdir -p data/{mongo,redis,ssl}
 mkdir -p logs/{nginx,parse,mongo}
 mkdir -p backups/mongo
 mkdir -p configs/nginx
+mkdir -p server/cloud
+
+# Create cloud code if not exists
+if [ ! -f server/cloud/main.js ]; then
+    cat > server/cloud/main.js << 'EOF'
+// Cloud Code
+Parse.Cloud.define('hello', async (request) => {
+  return 'Hello from OneStack!';
+});
+EOF
+fi
 
 # Pull images
-echo -e "${GREEN}[6/7] Pulling Docker images...${NC}"
+echo -e "${GREEN}[7/8] Pulling Docker images...${NC}"
 docker-compose pull
 
 # Start services
-echo -e "${GREEN}[7/7] Starting OneStack...${NC}"
+echo -e "${GREEN}[8/8] Starting OneStack...${NC}"
 docker-compose up -d
 
 # Wait for services
 echo -e "${YELLOW}Waiting for services to be healthy...${NC}"
-sleep 10
+sleep 15
 
 # Check status
-if docker-compose ps | grep -q "unhealthy\|Exit"; then
+if docker-compose ps | grep -q "unhealthy\|Exit\|Restarting"; then
     echo -e "${RED}⚠ Some services failed to start${NC}"
     docker-compose ps
     echo "Check logs: docker-compose logs"
@@ -125,9 +165,12 @@ echo -e "${GREEN}Access Points:${NC}"
 echo "  API:       http://$SERVER_IP/parse"
 echo "  Dashboard: http://$SERVER_IP/dashboard"
 echo ""
-echo -e "${YELLOW}Credentials (saved in .env):${NC}"
-echo "  Dashboard User: admin"
-echo "  Dashboard Pass: Check .env file"
+echo -e "${YELLOW}Dashboard Login:${NC}"
+echo "  Username: admin"
+echo "  Password: $DASHBOARD_PASS"
+echo ""
+echo -e "${GREEN}API Credentials:${NC}"
+echo "  App ID: $APP_ID"
 echo ""
 echo -e "${GREEN}Useful Commands:${NC}"
 echo "  View logs:    docker-compose logs -f"
@@ -145,6 +188,7 @@ cat > install.info << EOF
 Installation Date: $(date)
 Server IP: $SERVER_IP
 App ID: $APP_ID
+Dashboard Password: $DASHBOARD_PASS
 Version: 1.0.0
 EOF
 
