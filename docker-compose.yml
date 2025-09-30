@@ -192,21 +192,22 @@ services:
       redis:
         condition: service_healthy
 
-  dashboard:
-    image: parseplatform/parse-dashboard:5.2.0
-    container_name: onestack_dashboard
-    restart: unless-stopped
-    networks:
-      - internal
-    ports:          # <-- เพิ่มบรรทัดนี้
-      - "4040:4040" # <-- เพิ่มบรรทัดนี้
-    volumes:
-      - ./configs/dashboard/parse-dashboard-config.json:/src/Parse-Dashboard/parse-dashboard-config.json
-    environment:
-      PARSE_DASHBOARD_ALLOW_INSECURE_HTTP: "true"
-    command: parse-dashboard --config /src/Parse-Dashboard/parse-dashboard-config.json --allowInsecureHTTP
-    depends_on:
-      - parse-server
+    dashboard:
+      image: parseplatform/parse-dashboard:5.2.0
+      container_name: onestack_dashboard
+      restart: unless-stopped
+      networks:
+        - internal
+        - public       # เพิ่มบรรทัดนี้
+      ports:           # เพิ่มบรรทัดนี้
+        - "4040:4040"  # เพิ่มบรรทัดนี้
+      volumes:
+        - ./configs/dashboard/parse-dashboard-config.json:/src/Parse-Dashboard/parse-dashboard-config.json
+      environment:
+        PARSE_DASHBOARD_ALLOW_INSECURE_HTTP: "true"
+      command: parse-dashboard --config /src/Parse-Dashboard/parse-dashboard-config.json --allowInsecureHTTP
+      depends_on:
+        - parse-server
   # Data Layer
   mongodb:
     image: mongo:7.0
