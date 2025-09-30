@@ -41,4 +41,3 @@ RUN mkdir -p /app/logs
 EXPOSE 1337
 
 CMD ["node", "index.js"]
-~                             
