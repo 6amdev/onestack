@@ -198,9 +198,8 @@ services:
     restart: unless-stopped
     networks:
       - internal
-      - public    # เพิ่ม public network
-    ports:
-      - "4040:4040"    # เพิ่ม port mapping
+    ports:          # <-- เพิ่มบรรทัดนี้
+      - "4040:4040" # <-- เพิ่มบรรทัดนี้
     volumes:
       - ./configs/dashboard/parse-dashboard-config.json:/src/Parse-Dashboard/parse-dashboard-config.json
     environment:
@@ -208,7 +207,6 @@ services:
     command: parse-dashboard --config /src/Parse-Dashboard/parse-dashboard-config.json --allowInsecureHTTP
     depends_on:
       - parse-server
-
   # Data Layer
   mongodb:
     image: mongo:7.0
