@@ -120,14 +120,41 @@ fi
 INSTALL_DIR=""
 ADMIN_USER=""
 ONESTACK_USER=""
+PRIMARY_DOMAIN=""
 
 if [ -f "/root/.onestack_install_state" ]; then
-    source "/root/.onestack_install_state"
+    # Safe load - handle dates with spaces and special characters
+    set +e  # Don't exit on error
+    
+    while IFS='=' read -r key value; do
+        # Skip empty lines and comments
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        
+        # Remove quotes and extra whitespace
+        value=$(echo "$value" | sed 's/^["'\''[:space:]]*//' | sed 's/["'\''[:space:]]*$//' | tr -d '\n')
+        
+        # Export only known safe variables
+        case "$key" in
+            INSTALL_DIR|ADMIN_USER|ONESTACK_USER|PRIMARY_DOMAIN|SSL_EMAIL|SSL_MODE|\
+            INSTALL_PARSE|INSTALL_MONITORING|INSTALL_ADMINER|\
+            PHASE_*|INSTALLATION_*|DEPLOYMENT_*)
+                eval "$key=\"$value\""
+                ;;
+        esac
+    done < "/root/.onestack_install_state"
+    
+    set -e  # Re-enable exit on error
+    
     print_success "Found installation state"
     [ -n "$INSTALL_DIR" ] && print_info "Install directory: $INSTALL_DIR"
     [ -n "$ONESTACK_USER" ] && print_info "Service user: $ONESTACK_USER"
 else
     print_warning "No installation state found"
+    
+    # Set defaults if no state file
+    INSTALL_DIR="/opt/onestack"
+    ONESTACK_USER="onestack"
+    ADMIN_USER="admin"
 fi
 
 echo ""

@@ -113,15 +113,18 @@ load_config() {
 
 # Save variable to file
 save_var() {
-    local var_name=$1
-    local var_value=$2
-    local file=${3:-/root/.onestack_vars}
+    local key=$1
+    local value=$2
     
-    # Create or update variable in file
-    if [ -f "$file" ]; then
-        sed -i "/^export $var_name=/d" "$file"
+    # Remove any existing newlines or spaces from value
+    value=$(echo "$value" | tr -d '\n' | sed 's/[[:space:]]*$//')
+    
+    # Update or add to state file with proper quoting
+    if grep -q "^${key}=" "$STATE_FILE" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$STATE_FILE"
+    else
+        echo "${key}=\"${value}\"" >> "$STATE_FILE"
     fi
-    echo "export $var_name='$var_value'" >> "$file"
 }
 
 # Load saved variables

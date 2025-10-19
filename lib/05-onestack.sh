@@ -120,7 +120,7 @@ save_credentials() {
     cat > "$cred_file" << EOF
 ═══════════════════════════════════════════════════
 OneStack Credentials
-Generated: $(date)
+Generated: $(date +'%Y-%m-%d_%H-%M-%S')
 Domain: $PRIMARY_DOMAIN
 ═══════════════════════════════════════════════════
 
@@ -224,7 +224,7 @@ create_env_file() {
     
     cat > "$env_file" << EOF
 # OneStack Environment Configuration
-# Generated: $(date)
+# Generated: $(date +'%Y-%m-%d_%H-%M-%S')
 # DO NOT COMMIT THIS FILE TO VERSION CONTROL
 
 # ═══════════════════════════════════════════════════
@@ -699,17 +699,32 @@ create_database_init_scripts() {
 #!/bin/bash
 set -e
 
+echo "=== OneStack PostgreSQL Initialization ==="
+
 # Create multiple databases from comma-separated list
 if [ -n "$POSTGRES_MULTIPLE_DATABASES" ]; then
     echo "Creating multiple databases: $POSTGRES_MULTIPLE_DATABASES"
     for db in $(echo $POSTGRES_MULTIPLE_DATABASES | tr ',' ' '); do
         echo "  Creating database: $db"
-        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
-            CREATE DATABASE $db;
-            GRANT ALL PRIVILEGES ON DATABASE $db TO $POSTGRES_USER;
+        
+        # Check if database exists
+        DB_EXISTS=$(psql -U "$POSTGRES_USER" -tAc "SELECT 1 FROM pg_database WHERE datname='$db'")
+        
+        if [ "$DB_EXISTS" = "1" ]; then
+            echo "  Database $db already exists, skipping..."
+        else
+            psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+                CREATE DATABASE $db;
+                GRANT ALL PRIVILEGES ON DATABASE $db TO $POSTGRES_USER;
 EOSQL
+            echo "  Database $db created successfully"
+        fi
     done
+else
+    echo "No POSTGRES_MULTIPLE_DATABASES specified"
 fi
+
+echo "=== PostgreSQL initialization completed ==="
 EOF
 
     chmod +x "$INSTALL_DIR/databases/postgres/init/01-create-databases.sh"
@@ -1379,39 +1394,116 @@ deploy_services() {
 wait_for_services() {
     print_header "Waiting for Services"
     
-    print_info "This may take 1-2 minutes..."
+    print_info "This may take 2-3 minutes..."
     echo ""
     
-    local max_wait=120
+    local max_wait=180
     local waited=0
     local interval=5
     
     cd "$INSTALL_DIR"
     
-    while [ $waited -lt $max_wait ]; do
-        local healthy=true
+    # Phase 1: Wait for containers to start
+    print_step "Phase 1: Starting containers..."
+    while [ $waited -lt 60 ]; do
+        local all_up=true
         
-        # Check each service
         for service in postgres mongodb redis minio nginx; do
             if ! docker compose ps "$service" 2>/dev/null | grep -q "Up"; then
-                healthy=false
+                all_up=false
                 break
             fi
         done
         
-        if [ "$healthy" = true ]; then
-            print_success "All core services are running!"
-            return 0
+        if [ "$all_up" = true ]; then
+            print_success "All containers started"
+            break
         fi
         
         echo -n "."
         sleep $interval
         waited=$((waited + interval))
     done
-    
     echo ""
-    print_warning "Some services may not be fully ready yet"
-    print_info "Check status with: docker compose ps"
+    
+    # Phase 2: Wait for PostgreSQL to be ready
+    print_step "Phase 2: Waiting for PostgreSQL..."
+    local pg_ready=false
+    local pg_wait=0
+    
+    while [ $pg_wait -lt 60 ]; do
+        if docker compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+            pg_ready=true
+            print_success "PostgreSQL is ready"
+            break
+        fi
+        echo -n "."
+        sleep 2
+        pg_wait=$((pg_wait + 2))
+    done
+    echo ""
+    
+    if [ "$pg_ready" = false ]; then
+        print_warning "PostgreSQL may not be fully ready"
+    fi
+    
+    # Phase 3: Verify databases exist
+    if [ "$INSTALL_PARSE" = "true" ] && [ "$pg_ready" = true ]; then
+        print_step "Phase 3: Verifying parse_db..."
+        
+        # Give database init script time to run
+        sleep 5
+        
+        # Check if parse_db exists
+        if docker compose exec -T postgres psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='parse_db'" 2>/dev/null | grep -q 1; then
+            print_success "parse_db exists"
+        else
+            print_warning "parse_db not found, creating..."
+            docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE parse_db;" >/dev/null 2>&1 || true
+            sleep 2
+            print_success "parse_db created"
+        fi
+    fi
+    
+    # Phase 4: Wait for Parse Server (if enabled)
+    if [ "$INSTALL_PARSE" = "true" ]; then
+        print_step "Phase 4: Waiting for Parse Server..."
+        
+        # Restart Parse Server to ensure it connects
+        docker compose restart parse-server >/dev/null 2>&1 || true
+        
+        local parse_wait=0
+        while [ $parse_wait -lt 30 ]; do
+            if docker compose ps parse-server 2>/dev/null | grep -q "Up"; then
+                if ! docker compose ps parse-server 2>/dev/null | grep -q "Restarting"; then
+                    print_success "Parse Server is running"
+                    break
+                fi
+            fi
+            echo -n "."
+            sleep 2
+            parse_wait=$((parse_wait + 2))
+        done
+        echo ""
+    fi
+    
+    # Final check
+    print_step "Final verification..."
+    sleep 5
+    
+    local all_healthy=true
+    for service in postgres mongodb redis minio; do
+        if ! docker compose ps "$service" 2>/dev/null | grep -q "Up"; then
+            all_healthy=false
+            print_warning "$service is not running properly"
+        fi
+    done
+    
+    if [ "$all_healthy" = true ]; then
+        print_success "All core services are healthy!"
+    else
+        print_warning "Some services may need attention"
+    fi
     
     return 0
 }
@@ -1425,6 +1517,73 @@ verify_services() {
     docker compose ps
     
     echo ""
+}
+
+# ════════════════════════════════════════════════
+# VERIFY PARSE SERVER CONNECTION
+# ════════════════════════════════════════════════
+
+verify_parse_connection() {
+    if [ "$INSTALL_PARSE" != "true" ]; then
+        return 0
+    fi
+    
+    print_header "Verifying Parse Server"
+    
+    local max_retries=5
+    local retry=0
+    
+    while [ $retry -lt $max_retries ]; do
+        retry=$((retry + 1))
+        
+        print_step "Attempt $retry/$max_retries..."
+        
+        # Check if Parse Server is running
+        if docker compose ps parse-server 2>/dev/null | grep -q "Restarting"; then
+            print_warning "Parse Server is restarting, checking logs..."
+            
+            # Check for password error
+            if docker compose logs parse-server 2>/dev/null | tail -20 | grep -q "password authentication failed"; then
+                print_error "Password authentication failed, fixing..."
+                
+                # Fix password in .env
+                local pg_pass=$(grep "^POSTGRES_PASSWORD=" "$INSTALL_DIR/.env" | cut -d'=' -f2)
+                sed -i "s|postgres://postgres:[^@]*@|postgres://postgres:$pg_pass@|g" "$INSTALL_DIR/.env"
+                
+                print_info "Restarting Parse Server..."
+                docker compose restart parse-server >/dev/null 2>&1
+                sleep 10
+            else
+                print_info "Waiting for Parse Server..."
+                sleep 10
+            fi
+        elif docker compose ps parse-server 2>/dev/null | grep -q "Up"; then
+            # Check if API responds
+            if curl -s http://localhost:1337/parse/health >/dev/null 2>&1; then
+                print_success "Parse Server is healthy!"
+                return 0
+            else
+                print_info "Parse Server starting..."
+                sleep 5
+            fi
+        else
+            print_warning "Parse Server is not running"
+            sleep 5
+        fi
+    done
+    
+    # Final check
+    if docker compose ps parse-server 2>/dev/null | grep -q "Up"; then
+        if ! docker compose ps parse-server 2>/dev/null | grep -q "Restarting"; then
+            print_success "Parse Server is running"
+            return 0
+        fi
+    fi
+    
+    print_warning "Parse Server may need manual verification"
+    print_info "Check logs with: cd $INSTALL_DIR && docker compose logs parse-server"
+    
+    return 0
 }
 
 # ════════════════════════════════════════════════
@@ -1607,6 +1766,7 @@ run_onestack_setup() {
     # Deploy
     deploy_services
     wait_for_services
+    verify_parse_connection  # ← เพิ่มบรรทัดนี้
     verify_services
     
     # Success
@@ -1614,7 +1774,7 @@ run_onestack_setup() {
     
     # Save completion state
     save_var "PHASE_2_COMPLETE" "true"
-    save_var "DEPLOYMENT_DATE" "$(date)"
+    save_var "DEPLOYMENT_DATE" "$(date +'%Y-%m-%d_%H-%M-%S')"
     
     success_message "OneStack deployment completed successfully! 🎉"
 }
