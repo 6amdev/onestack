@@ -572,14 +572,11 @@ EOF
     image: parseplatform/parse-dashboard:latest
     container_name: onestack-parse-dashboard
     restart: unless-stopped
+    volumes:
+      - ./parse-dashboard/parse-dashboard-config.json:/parse-dashboard/config.json:ro
     environment:
-      PARSE_DASHBOARD_USER_ID: ${PARSE_DASHBOARD_USER}
-      PARSE_DASHBOARD_USER_PASSWORD: ${PARSE_DASHBOARD_PASSWORD}
-      PARSE_DASHBOARD_APP_ID: ${PARSE_APP_ID}
-      PARSE_DASHBOARD_MASTER_KEY: ${PARSE_MASTER_KEY}
-      PARSE_DASHBOARD_SERVER_URL: ${PARSE_PUBLIC_SERVER_URL}
-      PARSE_DASHBOARD_APP_NAME: ${PARSE_DASHBOARD_APP_NAME}
-      TZ: ${TIMEZONE}
+      PARSE_DASHBOARD_CONFIG: /parse-dashboard/config.json
+      TZ: \${TIMEZONE}
     networks:
       - backend
     ports:
@@ -768,6 +765,63 @@ EOF
     
     # Set ownership
     chown -R "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR/databases"
+    
+    echo ""
+}
+
+# ════════════════════════════════════════════════
+# CREATE PARSE DASHBOARD CONFIG
+# ════════════════════════════════════════════════
+
+create_parse_dashboard_config() {
+    if [ "$INSTALL_PARSE" != "true" ]; then
+        return 0
+    fi
+    
+    print_header "Creating Parse Dashboard Config"
+    
+    local config_dir="$INSTALL_DIR/parse-dashboard"
+    
+    print_step "Creating directory: $config_dir"
+    mkdir -p "$config_dir"
+    
+    print_step "Generating config file..."
+    cat > "$config_dir/parse-dashboard-config.json" << EOF
+{
+  "apps": [
+    {
+      "serverURL": "http://parse-server:1337/parse",
+      "appId": "${PARSE_APP_ID}",
+      "masterKey": "${PARSE_MASTER_KEY}",
+      "appName": "OneStack",
+      "production": false,
+      "iconName": "onestack.png"
+    }
+  ],
+  "users": [
+    {
+      "user": "${PARSE_DASHBOARD_USER:-admin}",
+      "pass": "${PARSE_DASHBOARD_PASSWORD}"
+    }
+  ],
+  "iconsFolder": "icons"
+}
+EOF
+    
+    # Set permissions
+    if id "$ONESTACK_USER" &>/dev/null; then
+        chown -R "$ONESTACK_USER:$ONESTACK_USER" "$config_dir"
+    fi
+    chmod 644 "$config_dir/parse-dashboard-config.json"
+    
+    # Verify
+    if [ -f "$config_dir/parse-dashboard-config.json" ]; then
+        print_success "Parse Dashboard config created"
+        print_info "Config file: $config_dir/parse-dashboard-config.json"
+    else
+        print_error "Failed to create config file"
+        return 1
+    fi
     
     echo ""
 }
@@ -1759,6 +1813,7 @@ run_onestack_setup() {
     create_env_file
     create_database_init_scripts
     create_docker_compose
+    create_parse_dashboard_config  
     create_nginx_config
     create_monitoring_config
     create_default_frontend
@@ -1782,6 +1837,7 @@ run_onestack_setup() {
 # Export functions
 export -f create_directory_structure generate_passwords save_credentials
 export -f create_env_file create_docker_compose create_database_init_scripts
+export -f create_parse_dashboard_config
 export -f create_nginx_config create_monitoring_config create_default_frontend
 export -f deploy_services wait_for_services verify_services
 export -f display_access_info run_onestack_setup

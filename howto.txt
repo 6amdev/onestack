@@ -99,3 +99,5 @@ Thumbs.db
 ✅ config.ip.example.yml - สำหรับ IP testing
 ✅ QUICKSTART.md - คู่มือเริ่มต้นอย่างเร็ว
 ✅ .gitignore - ป้องกัน commit ข้อมูลสำคัญ
+
+sudo cat /opt/onestack/.credentials
