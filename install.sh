@@ -218,7 +218,7 @@ echo ""
 # Save Phase 1 state
 cat > /root/.onestack_install_state << EOF
 PHASE_1_COMPLETE=true
-PHASE_1_DATE=$(date +"%Y-%m-%d %H:%M:%S")
+PHASE_1_DATE="$(date +"%Y-%m-%d_%H-%M-%S")"
 ADMIN_USER=$ADMIN_USER
 ONESTACK_USER=$ONESTACK_USER
 INSTALL_DIR=$INSTALL_DIR
