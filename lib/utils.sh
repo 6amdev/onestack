@@ -1,6 +1,9 @@
 #!/bin/bash
 # OneStack - Utility Functions
 
+# State file location
+export STATE_FILE="${STATE_FILE:-/root/.onestack_install_state}"
+
 # Colors
 export RED='\033[0;31m'
 export GREEN='\033[0;32m'
@@ -115,15 +118,19 @@ load_config() {
 save_var() {
     local key=$1
     local value=$2
+    local state_file=${STATE_FILE:-/root/.onestack_install_state}
     
     # Remove any existing newlines or spaces from value
     value=$(echo "$value" | tr -d '\n' | sed 's/[[:space:]]*$//')
     
+    # Create state file if not exists
+    touch "$state_file" 2>/dev/null || return 1
+    
     # Update or add to state file with proper quoting
-    if grep -q "^${key}=" "$STATE_FILE" 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$STATE_FILE"
+    if grep -q "^${key}=" "$state_file" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$state_file"
     else
-        echo "${key}=\"${value}\"" >> "$STATE_FILE"
+        echo "${key}=\"${value}\"" >> "$state_file"
     fi
 }
 
