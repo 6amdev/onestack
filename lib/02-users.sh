@@ -124,23 +124,25 @@ create_onestack_user() {
     # No password needed (will use sudo -u or su)
     print_info "Service user created (no password, no sudo access)"
     
-    # Create necessary directories
-    local install_dir="/home/$onestack_user/onestack"
-    if [ ! -d "$install_dir" ]; then
-        create_dir "$install_dir" "$onestack_user:$onestack_user" "755"
-        print_success "Installation directory: $install_dir"
+    # Don't override INSTALL_DIR - it's set from config.yml
+    # Just log what it will be
+    if [ -n "$INSTALL_DIR" ]; then
+        print_info "Installation directory (from config): $INSTALL_DIR"
+    else
+        # Fallback if not set
+        INSTALL_DIR="/opt/onestack"
+        print_info "Installation directory (default): $INSTALL_DIR"
     fi
-    
-    save_var "INSTALL_DIR" "$install_dir"
+
     save_var "ONESTACK_USER_CREATED" "true"
-    
-    echo ""
+        
+        echo ""
 }
 
 create_installation_directory() {
     print_header "Creating Installation Directory"
     
-    local install_dir="$INSTALL_DIR"
+    local install_dir="${INSTALL_DIR:-/opt/onestack}"
     
     print_step "Creating directory: $install_dir"
     
@@ -260,6 +262,9 @@ run_user_management() {
     # Create OneStack service user (no sudo)
     create_onestack_user
     
+    # Create installation directory
+    create_installation_directory
+    
     # Setup SSH keys
     setup_ssh_keys
     
@@ -273,6 +278,7 @@ run_user_management() {
     print_warning "SECURITY NOTE:"
     echo "  • Admin user: $ADMIN_USER (has sudo access)"
     echo "  • Service user: $ONESTACK_USER (no sudo)"
+    echo "  • Install directory: $INSTALL_DIR"
     echo "  • All services will run as: $ONESTACK_USER"
     echo "  • Root login will be disabled after setup"
     print_warning "═══════════════════════════════════════"
