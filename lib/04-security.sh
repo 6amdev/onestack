@@ -1,7 +1,8 @@
 #!/bin/bash
 # OneStack - Security Configuration
 
-source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"  
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$LIB_DIR/utils.sh"
 
 setup_firewall() {
     print_header "Firewall Configuration (UFW)"

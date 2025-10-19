@@ -1,7 +1,8 @@
 #!/bin/bash
 # OneStack - System Preparation
 
-source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"  
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$LIB_DIR/utils.sh"
 
 system_prepare() {
     print_header "System Preparation"

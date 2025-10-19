@@ -1,8 +1,8 @@
 #!/bin/bash
 # OneStack - User Management
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/utils.sh"
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$LIB_DIR/utils.sh"
 
 create_admin_user() {
     print_header "Creating Admin User"
