@@ -1,7 +1,7 @@
 #!/bin/bash
 # OneStack - System Preparation
 
-source "$(dirname "$0")/utils.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"  
 
 system_prepare() {
     print_header "System Preparation"

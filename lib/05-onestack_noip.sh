@@ -1,7 +1,7 @@
 #!/bin/bash
 # OneStack - Service Deployment
 
-source "$(dirname "$0")/utils.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"  
 
 # ════════════════════════════════════════════════
 # DIRECTORY STRUCTURE

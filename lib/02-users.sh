@@ -1,7 +1,7 @@
 #!/bin/bash
 # OneStack - User Management
 
-source "$(dirname "$0")/utils.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"  
 
 create_admin_user() {
     print_header "Creating Admin User"

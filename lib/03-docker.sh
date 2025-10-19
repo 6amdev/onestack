@@ -1,7 +1,7 @@
 #!/bin/bash
 # OneStack - Docker Installation
 
-source "$(dirname "$0")/utils.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"  
 
 check_docker() {
     if command_exists docker; then
