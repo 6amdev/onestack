@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load utilities
-source "$SCRIPT_DIR/lib/utils.sh"
+source "$SCRIPT_DIR/utils.sh"
 
 # ════════════════════════════════════════════════
 # BANNER
@@ -180,25 +180,25 @@ log_message "INFO" "Starting Phase 1: System Preparation"
 
 # Step 1: System Check & Update
 print_info "[1/4] System Preparation..."
-source "$SCRIPT_DIR/lib/01-system.sh"
+source "$SCRIPT_DIR/01-system.sh"
 run_system_preparation
 log_message "INFO" "System preparation completed"
 
 # Step 2: User Management
 print_info "[2/4] User Management..."
-source "$SCRIPT_DIR/lib/02-users.sh"
+source "$SCRIPT_DIR/02-users.sh"
 run_user_management
 log_message "INFO" "User management completed"
 
 # Step 3: Docker Installation
 print_info "[3/4] Docker Installation..."
-source "$SCRIPT_DIR/lib/03-docker.sh"
+source "$SCRIPT_DIR/03-docker.sh"
 run_docker_installation
 log_message "INFO" "Docker installation completed"
 
 # Step 4: Security Setup
 print_info "[4/4] Security Configuration..."
-source "$SCRIPT_DIR/lib/04-security.sh"
+source "$SCRIPT_DIR/04-security.sh"
 run_security_setup
 log_message "INFO" "Security setup completed"
 
@@ -299,7 +299,7 @@ if ! confirm "Continue with Phase 2 (Service Deployment)?"; then
 fi
 
 # Load Phase 2
-source "$SCRIPT_DIR/lib/05-onestack.sh"
+source "$SCRIPT_DIR/05-onestack.sh"
 run_onestack_setup
 
 log_message "INFO" "Phase 2 completed"
