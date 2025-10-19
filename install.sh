@@ -1,35 +1,19 @@
 #!/bin/bash
-
-# OneStack v2 - Interactive Installer
-# Complete SME Platform Installation Script
+# OneStack v2 - Complete Installer
+# Phase 1: System Setup + Phase 2: Service Deployment
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
-
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="/opt/onestack"
 
-print_header() {
-    echo -e "\n${BLUE}═══════════════════════════════════════${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════${NC}\n"
-}
+# Load utilities
+source "$SCRIPT_DIR/lib/utils.sh"
 
-print_success() { echo -e "${GREEN}✓${NC} $1"; }
-print_error() { echo -e "${RED}✗${NC} $1"; }
-print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
-print_info() { echo -e "${CYAN}ℹ${NC} $1"; }
+# ════════════════════════════════════════════════
+# BANNER
+# ════════════════════════════════════════════════
 
-# Banner
 clear
 cat << 'BANNER'
 ╔═══════════════════════════════════════════════╗
@@ -42,381 +26,365 @@ cat << 'BANNER'
 BANNER
 
 echo ""
+print_info "Complete Installation System"
+echo ""
 print_info "This will install:"
-echo "  • Docker & Docker Compose"
-echo "  • PostgreSQL + MongoDB + Redis"
-echo "  • Nginx Reverse Proxy"
-echo "  • MinIO Object Storage"
-echo "  • Parse Server (Optional)"
-echo "  • Monitoring Stack (Optional)"
+echo "  Phase 1: System preparation, users, Docker, security"
+echo "  Phase 2: OneStack services deployment"
 echo ""
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    print_error "Please run as root"
-    echo "Run: sudo bash install.sh"
-    exit 1
-fi
+# ════════════════════════════════════════════════
+# ROOT CHECK
+# ════════════════════════════════════════════════
 
-# System requirements check
-print_header "System Requirements Check"
+check_root
 
-# Check OS
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    print_success "OS: $PRETTY_NAME"
+# ════════════════════════════════════════════════
+# LOAD CONFIGURATION
+# ════════════════════════════════════════════════
+
+print_header "Loading Configuration"
+
+CONFIG_FILE="$SCRIPT_DIR/config.yml"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    print_error "Configuration file not found: $CONFIG_FILE"
+    echo ""
+    print_info "Please create config.yml first:"
+    echo ""
     
-    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-        print_warning "This script is optimized for Ubuntu/Debian"
-        read -p "Continue anyway? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
+    # แสดงตัวเลือก
+    if [ -f "$SCRIPT_DIR/config.example.yml" ]; then
+        echo "  Option 1: Copy from example"
+        echo "    cp config.example.yml config.yml"
+        echo "    nano config.yml"
+        echo ""
     fi
-else
-    print_error "Cannot detect OS"
+    
+    if [ -f "$SCRIPT_DIR/config.domain.example.yml" ]; then
+        echo "  Option 2: Use domain template"
+        echo "    cp config.domain.example.yml config.yml"
+        echo "    nano config.yml  # Edit your domain"
+        echo ""
+    fi
+    
+    if [ -f "$SCRIPT_DIR/config.ip.example.yml" ]; then
+        echo "  Option 3: Use IP template"
+        echo "    cp config.ip.example.yml config.yml"
+        echo "    nano config.yml  # Edit your IP"
+        echo ""
+    fi
+    
+    echo "  Then run installer again:"
+    echo "    sudo bash install.sh"
+    echo ""
+    
     exit 1
 fi
 
-# Check resources
-TOTAL_RAM=$(free -m | awk 'NR==2 {print $2}')
-AVAILABLE_DISK=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+load_config "$CONFIG_FILE"
+print_success "Configuration loaded"
+echo ""
 
-if [ "$TOTAL_RAM" -lt 2000 ]; then
-    print_warning "RAM: ${TOTAL_RAM}MB (Minimum 2GB recommended)"
+# ════════════════════════════════════════════════
+# SHOW INSTALLATION PLAN
+# ════════════════════════════════════════════════
+
+print_header "Installation Plan"
+
+echo "System Configuration:"
+echo "  • Admin User: $ADMIN_USER (with sudo)"
+echo "  • Service User: $ONESTACK_USER (no sudo)"
+echo "  • Install Directory: $INSTALL_DIR"
+echo "  • Timezone: ${CONFIG_system_timezone:-UTC}"
+echo ""
+
+echo "Domain Configuration:"
+echo "  • Primary Domain: $PRIMARY_DOMAIN"
+echo "  • SSL Email: $SSL_EMAIL"
+echo "  • SSL Mode: $SSL_MODE"
+echo ""
+
+echo "Core Services (Always Installed):"
+echo "  ✓ Nginx Reverse Proxy"
+echo "  ✓ PostgreSQL Database (with pgvector)"
+echo "  ✓ MongoDB Database"
+echo "  ✓ Redis Cache"
+echo "  ✓ MinIO Object Storage"
+echo ""
+
+echo "Optional Components:"
+if [ "$INSTALL_PARSE" = "true" ]; then
+    echo "  ✓ Parse Server (Backend-as-a-Service)"
 else
-    print_success "RAM: ${TOTAL_RAM}MB"
+    echo "  ✗ Parse Server (disabled)"
 fi
 
-if [ "$AVAILABLE_DISK" -lt 20 ]; then
-    print_warning "Disk: ${AVAILABLE_DISK}GB (Minimum 20GB recommended)"
+if [ "$INSTALL_MONITORING" = "true" ]; then
+    echo "  ✓ Monitoring Stack (Grafana + Prometheus)"
 else
-    print_success "Disk: ${AVAILABLE_DISK}GB available"
+    echo "  ✗ Monitoring Stack (disabled)"
+fi
+
+if [ "$INSTALL_ADMINER" = "true" ]; then
+    echo "  ✓ Adminer (Database UI)"
+else
+    echo "  ✗ Adminer (disabled)"
 fi
 
 echo ""
-read -p "Continue with installation? (Y/n): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Nn]$ ]]; then
+
+echo "Security Features:"
+if [ "${CONFIG_security_fail2ban_enabled:-true}" = "true" ]; then
+    echo "  ✓ Fail2Ban (intrusion prevention)"
+else
+    echo "  ✗ Fail2Ban (disabled)"
+fi
+
+if [ "${CONFIG_security_ssh_disable_root_login:-true}" = "true" ]; then
+    echo "  ✓ SSH: Root login will be disabled"
+else
+    echo "  ⚠ SSH: Root login will remain enabled"
+fi
+
+echo ""
+
+# Estimated time
+print_info "Estimated installation time: 15-25 minutes"
+echo ""
+
+if ! confirm "Start installation with this configuration?"; then
+    print_info "Installation cancelled"
+    echo ""
+    print_info "To change settings:"
+    echo "  1. Edit: nano config.yml"
+    echo "  2. Run again: sudo bash install.sh"
     exit 0
 fi
 
-# Docker Installation
-print_header "Docker Installation"
+# Create log file
+export LOG_FILE="/var/log/onestack-install.log"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
 
-if command -v docker &> /dev/null; then
-    DOCKER_VERSION=$(docker --version | cut -d' ' -f3 | cut -d',' -f1)
-    print_success "Docker already installed: $DOCKER_VERSION"
-    
-    read -p "Reinstall Docker? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        INSTALL_DOCKER=true
-    else
-        INSTALL_DOCKER=false
-    fi
-else
-    print_info "Docker not found"
-    read -p "Install Docker now? (Y/n): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        INSTALL_DOCKER=true
-    else
-        print_error "Docker is required"
-        exit 1
-    fi
-fi
+log_message "INFO" "OneStack installation started"
+log_message "INFO" "Configuration loaded from: $CONFIG_FILE"
 
-if [ "$INSTALL_DOCKER" = true ]; then
-    print_info "Installing Docker..."
-    
-    # Remove old versions
-    apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-    
-    # Update packages
-    apt-get update -qq
-    
-    # Install dependencies
-    apt-get install -y -qq \
-        ca-certificates \
-        curl \
-        gnupg \
-        lsb-release
-    
-    # Add Docker's GPG key
-    mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    
-    # Add Docker repository
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-      $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Install Docker
-    apt-get update -qq
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
-    
-    # Start Docker
-    systemctl start docker
-    systemctl enable docker
-    
-    print_success "Docker installed: $(docker --version)"
-fi
+# ════════════════════════════════════════════════
+# PHASE 1: SYSTEM PREPARATION
+# ════════════════════════════════════════════════
 
-# Check Docker Compose
-if docker compose version &> /dev/null; then
-    print_success "Docker Compose: $(docker compose version --short)"
-else
-    print_error "Docker Compose not found"
-    exit 1
-fi
-
-# User Management
-print_header "User Management"
-
-read -p "Create 'onestack' user? (Y/n): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-    if id "onestack" &>/dev/null; then
-        print_warning "User 'onestack' already exists"
-    else
-        useradd -m -s /bin/bash onestack
-        usermod -aG docker onestack
-        print_success "User 'onestack' created"
-        
-        echo ""
-        print_info "Set password for 'onestack' user:"
-        passwd onestack
-    fi
-fi
-
-# Installation Directory
-print_header "Installation Directory"
-
-print_info "Default: $INSTALL_DIR"
-read -p "Use default directory? (Y/n): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Nn]$ ]]; then
-    read -p "Enter custom path: " INSTALL_DIR
-fi
-
-if [ -d "$INSTALL_DIR" ] && [ "$(ls -A $INSTALL_DIR)" ]; then
-    print_warning "Directory $INSTALL_DIR is not empty"
-    read -p "Remove existing files? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf $INSTALL_DIR/*
-        print_success "Directory cleaned"
-    else
-        print_error "Installation cancelled"
-        exit 1
-    fi
-fi
-
-mkdir -p $INSTALL_DIR
-cd $INSTALL_DIR
-
-print_success "Installation directory: $INSTALL_DIR"
-
-# Component Selection
-print_header "Component Selection"
-
-echo "Select components to install:"
+print_header "PHASE 1: System Preparation"
 echo ""
-echo "Core Components (Required):"
-echo "  [✓] Nginx Reverse Proxy"
-echo "  [✓] PostgreSQL Database"
-echo "  [✓] MongoDB Database"
-echo "  [✓] Redis Cache"
-echo "  [✓] MinIO Object Storage"
+log_message "INFO" "Starting Phase 1: System Preparation"
+
+# Step 1: System Check & Update
+print_info "[1/4] System Preparation..."
+source "$SCRIPT_DIR/lib/01-system.sh"
+run_system_preparation
+log_message "INFO" "System preparation completed"
+
+# Step 2: User Management
+print_info "[2/4] User Management..."
+source "$SCRIPT_DIR/lib/02-users.sh"
+run_user_management
+log_message "INFO" "User management completed"
+
+# Step 3: Docker Installation
+print_info "[3/4] Docker Installation..."
+source "$SCRIPT_DIR/lib/03-docker.sh"
+run_docker_installation
+log_message "INFO" "Docker installation completed"
+
+# Step 4: Security Setup
+print_info "[4/4] Security Configuration..."
+source "$SCRIPT_DIR/lib/04-security.sh"
+run_security_setup
+log_message "INFO" "Security setup completed"
+
+# ════════════════════════════════════════════════
+# PHASE 1 COMPLETE
+# ════════════════════════════════════════════════
+
+print_header "Phase 1 Complete! ✓"
 echo ""
 
-read -p "Install Parse Server? (Y/n): " -n 1 -r
-echo
-INSTALL_PARSE=$([[ ! $REPLY =~ ^[Nn]$ ]] && echo "true" || echo "false")
-
-read -p "Install Monitoring (Grafana + Prometheus)? (Y/n): " -n 1 -r
-echo
-INSTALL_MONITORING=$([[ ! $REPLY =~ ^[Nn]$ ]] && echo "true" || echo "false")
-
-read -p "Install Adminer (Database UI)? (Y/n): " -n 1 -r
-echo
-INSTALL_ADMINER=$([[ ! $REPLY =~ ^[Nn]$ ]] && echo "true" || echo "false")
-
-# Domain Configuration
-print_header "Domain Configuration"
-
-print_info "For local testing, use 'localhost'"
-print_info "For production, use your domain name"
+print_success "✓ System Preparation"
+print_success "✓ User Management"
+print_success "✓ Docker Installation"
+print_success "✓ Security Setup"
 echo ""
-read -p "Enter domain name [localhost]: " PRIMARY_DOMAIN
-PRIMARY_DOMAIN=${PRIMARY_DOMAIN:-localhost}
 
-if [ "$PRIMARY_DOMAIN" != "localhost" ]; then
-    read -p "Enter email for SSL certificates: " SSL_EMAIL
-else
-    SSL_EMAIL="admin@localhost"
-fi
-
-print_success "Domain: $PRIMARY_DOMAIN"
-
-# Generate Passwords
-print_header "Security Configuration"
-
-print_info "Generating secure passwords..."
-
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-MONGODB_PASSWORD=$(openssl rand -hex 16)
-REDIS_PASSWORD=$(openssl rand -hex 16)
-MINIO_PASSWORD=$(openssl rand -hex 16)
-GRAFANA_PASSWORD=$(openssl rand -hex 16)
-
-if [ "$INSTALL_PARSE" = true ]; then
-    PARSE_APP_ID=$(openssl rand -hex 16)
-    PARSE_MASTER_KEY=$(openssl rand -hex 32)
-fi
-
-print_success "Secure passwords generated"
-
-# Create Configuration
-print_header "Creating Configuration Files"
-
-# Create .env
-cat > .env << EOF
-# OneStack Configuration
-# Generated: $(date)
-
-COMPOSE_PROJECT_NAME=onestack
-TIMEZONE=Asia/Bangkok
+# Save Phase 1 state
+cat > /root/.onestack_install_state << EOF
+PHASE_1_COMPLETE=true
+PHASE_1_DATE=$(date +"%Y-%m-%d %H:%M:%S")
+ADMIN_USER=$ADMIN_USER
+ONESTACK_USER=$ONESTACK_USER
+INSTALL_DIR=$INSTALL_DIR
 PRIMARY_DOMAIN=$PRIMARY_DOMAIN
 SSL_EMAIL=$SSL_EMAIL
-
-# PostgreSQL
-POSTGRES_VERSION=16
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-POSTGRES_DB=onestack_main
-
-# MongoDB
-MONGODB_VERSION=7
-MONGODB_ROOT_USERNAME=admin
-MONGODB_ROOT_PASSWORD=$MONGODB_PASSWORD
-
-# Redis
-REDIS_VERSION=alpine
-REDIS_PASSWORD=$REDIS_PASSWORD
-
-# MinIO
-MINIO_VERSION=latest
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=$MINIO_PASSWORD
-
-# Grafana
-GRAFANA_ADMIN_USER=admin
-GRAFANA_ADMIN_PASSWORD=$GRAFANA_PASSWORD
-
-# Parse Server
-PARSE_APP_ID=$PARSE_APP_ID
-PARSE_MASTER_KEY=$PARSE_MASTER_KEY
-PARSE_DATABASE_URI=postgres://postgres:$POSTGRES_PASSWORD@postgres:5432/parse_db
-
-# Feature Flags
+SSL_MODE=$SSL_MODE
 INSTALL_PARSE=$INSTALL_PARSE
 INSTALL_MONITORING=$INSTALL_MONITORING
 INSTALL_ADMINER=$INSTALL_ADMINER
 EOF
 
-chmod 600 .env
-print_success ".env created"
+log_message "INFO" "Phase 1 state saved"
 
-# Save credentials
-cat > .credentials << EOF
-═══════════════════════════════════════
-OneStack Credentials
-Generated: $(date)
-═══════════════════════════════════════
+# ════════════════════════════════════════════════
+# SECURITY CHECKPOINT
+# ════════════════════════════════════════════════
 
-Domain: $PRIMARY_DOMAIN
-Email: $SSL_EMAIL
+if [ "${CONFIG_security_ssh_disable_root_login:-true}" = "true" ]; then
+    echo ""
+    print_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    print_warning "SECURITY CHECKPOINT"
+    print_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    if grep -q "^PermitRootLogin no" /etc/ssh/sshd_config 2>/dev/null; then
+        print_warning "Root SSH login has been disabled for security"
+        echo ""
+        echo "Before continuing to Phase 2:"
+        echo "  1. Keep this terminal open"
+        echo "  2. Open a NEW terminal"
+        echo "  3. Test admin login:"
+        echo ""
+        print_info "     ssh $ADMIN_USER@$(get_server_ip)"
+        echo ""
+        echo "  4. Test sudo access:"
+        echo ""
+        print_info "     sudo whoami"
+        echo ""
+        echo "  5. If successful, return here to continue"
+        echo ""
+        
+        if ! confirm "Have you tested and confirmed admin login works?"; then
+            print_warning "Installation paused for safety"
+            echo ""
+            print_info "When ready, run Phase 2 manually:"
+            print_info "  sudo bash -c 'source lib/utils.sh && source lib/05-onestack.sh && run_onestack_setup'"
+            echo ""
+            exit 0
+        fi
+    fi
+fi
 
-PostgreSQL:
-  Host: postgres (internal) or localhost:5432
-  User: postgres
-  Password: $POSTGRES_PASSWORD
-  Database: onestack_main
+# ════════════════════════════════════════════════
+# PHASE 2: SERVICE DEPLOYMENT
+# ════════════════════════════════════════════════
 
-MongoDB:
-  Host: mongodb (internal) or localhost:27017
-  User: admin
-  Password: $MONGODB_PASSWORD
-
-Redis:
-  Host: redis (internal) or localhost:6379
-  Password: $REDIS_PASSWORD
-
-MinIO:
-  Console: http://$PRIMARY_DOMAIN:9001
-  User: minioadmin
-  Password: $MINIO_PASSWORD
-
-Grafana:
-  URL: http://monitor.$PRIMARY_DOMAIN
-  User: admin
-  Password: $GRAFANA_PASSWORD
-
-Parse Server:
-  URL: http://api.$PRIMARY_DOMAIN/parse
-  App ID: $PARSE_APP_ID
-  Master Key: $PARSE_MASTER_KEY
-
-═══════════════════════════════════════
-IMPORTANT: Keep this file secure!
-═══════════════════════════════════════
-EOF
-
-chmod 600 .credentials
-print_success ".credentials created"
-
-# Directory Structure
-print_info "Creating directory structure..."
-
-mkdir -p {nginx/{conf.d,security},databases/{postgres/init,mongodb/init,redis},frontends/{main,app,admin},backends/{parse-server/cloud,nodejs-api,python-rag},monitoring/{prometheus,grafana/provisioning},backups/{postgres,mongodb,redis,minio},logs/{nginx,applications}}
-
-print_success "Directory structure created"
-
-# Summary
-print_header "Installation Summary"
-
-echo "Installation Path: $INSTALL_DIR"
-echo "Domain: $PRIMARY_DOMAIN"
 echo ""
-echo "Components:"
-echo "  ✓ Nginx Reverse Proxy"
-echo "  ✓ PostgreSQL"
-echo "  ✓ MongoDB"
-echo "  ✓ Redis"
-echo "  ✓ MinIO"
-[ "$INSTALL_PARSE" = true ] && echo "  ✓ Parse Server"
-[ "$INSTALL_MONITORING" = true ] && echo "  ✓ Monitoring Stack"
-[ "$INSTALL_ADMINER" = true ] && echo "  ✓ Adminer"
+print_header "PHASE 2: Service Deployment"
+echo ""
+log_message "INFO" "Starting Phase 2: Service Deployment"
+
+print_info "This will:"
+echo "  • Create directory structure"
+echo "  • Generate secure passwords"
+echo "  • Create Docker Compose configuration"
+echo "  • Deploy all selected services"
+echo "  • Setup Nginx reverse proxy"
+echo "  • Create welcome page"
 echo ""
 
-read -p "Continue with file creation? (Y/n): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Nn]$ ]]; then
-    print_warning "Installation paused"
-    print_info "Run this script again to continue"
+if ! confirm "Continue with Phase 2 (Service Deployment)?"; then
+    print_info "Phase 2 postponed"
+    echo ""
+    print_info "To continue later, run:"
+    print_info "  sudo bash -c 'source lib/utils.sh && source lib/05-onestack.sh && run_onestack_setup'"
+    echo ""
     exit 0
 fi
 
-print_info "Creating configuration files..."
-print_info "This will take a moment..."
+# Load Phase 2
+source "$SCRIPT_DIR/lib/05-onestack.sh"
+run_onestack_setup
 
-# Next step indicator
+log_message "INFO" "Phase 2 completed"
+
+# ════════════════════════════════════════════════
+# INSTALLATION COMPLETE
+# ════════════════════════════════════════════════
+
+print_header "🎉 Installation Complete!"
+
+log_message "INFO" "OneStack installation completed successfully"
+
+# Update state
+cat >> /root/.onestack_install_state << EOF
+PHASE_2_COMPLETE=true
+PHASE_2_DATE=$(date +"%Y-%m-%d %H:%M:%S")
+INSTALLATION_COMPLETE=true
+EOF
+
 echo ""
-print_success "Configuration complete!"
+print_success "Both phases completed successfully!"
 echo ""
-print_info "Next: Run './create-configs.sh' to generate all configuration files"
-print_info "Then: Run 'docker compose up -d' to start services"
+print_info "Installation log saved to: $LOG_FILE"
 echo ""
+
+# ════════════════════════════════════════════════
+# NEXT STEPS
+# ════════════════════════════════════════════════
+
+print_header "Next Steps"
+echo ""
+
+if [ "$PRIMARY_DOMAIN" != "localhost" ]; then
+    print_warning "DNS Configuration Required:"
+    echo ""
+    echo "Add these DNS records for your domain:"
+    echo ""
+    echo "  Type    Name                Value"
+    echo "  ────────────────────────────────────────────────"
+    echo "  A       @                   $(get_server_ip)"
+    echo "  A       *                   $(get_server_ip)"
+    echo "  CNAME   www                 @"
+    echo ""
+    print_info "Or add to /etc/hosts on your computer:"
+    echo "  $(get_server_ip)  $PRIMARY_DOMAIN"
+    echo "  $(get_server_ip)  www.$PRIMARY_DOMAIN"
+    echo "  $(get_server_ip)  api.$PRIMARY_DOMAIN"
+    echo "  $(get_server_ip)  monitor.$PRIMARY_DOMAIN"
+    echo "  $(get_server_ip)  storage.$PRIMARY_DOMAIN"
+    echo ""
+fi
+
+echo "Recommended next steps:"
+echo ""
+echo "  1. View credentials:"
+echo "     cat $INSTALL_DIR/.credentials"
+echo ""
+echo "  2. Visit welcome page:"
+if [ "$PRIMARY_DOMAIN" = "localhost" ]; then
+    echo "     http://localhost"
+else
+    echo "     http://$PRIMARY_DOMAIN"
+fi
+echo ""
+echo "  3. Check service status:"
+echo "     cd $INSTALL_DIR && docker compose ps"
+echo ""
+echo "  4. View logs:"
+echo "     cd $INSTALL_DIR && docker compose logs -f"
+echo ""
+echo "  5. Setup SSL (if using real domain):"
+echo "     Coming soon: sudo bash setup-ssl.sh"
+echo ""
+
+print_info "For help and documentation:"
+echo "  • Installation log: $LOG_FILE"
+echo "  • Credentials: $INSTALL_DIR/.credentials"
+echo "  • Architecture: ARCHITECTURE.md"
+echo ""
+
+echo "To uninstall:"
+echo "  sudo bash uninstall.sh"
+echo ""
+
+print_success "Thank you for using OneStack! 🚀"
+echo ""
+
+log_message "INFO" "Installation process finished"

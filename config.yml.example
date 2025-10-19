@@ -1,0 +1,127 @@
+# ═══════════════════════════════════════════════════
+# OneStack v2 - Installation Configuration
+# ═══════════════════════════════════════════════════
+# 
+# INSTRUCTIONS:
+# 1. Copy this file: cp config.example.yml config.yml
+# 2. Edit config.yml with your settings
+# 3. Run installer: sudo bash install.sh
+#
+# ═══════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════
+# SYSTEM CONFIGURATION
+# ═══════════════════════════════════════════════════
+
+system:
+  # Admin user (has sudo access)
+  admin_user: admin
+  
+  # OneStack user (runs services, no sudo)
+  onestack_user: onestack
+  
+  # Installation directory
+  install_dir: /opt/onestack
+  
+  # Timezone
+  timezone: Asia/Bangkok
+
+# ═══════════════════════════════════════════════════
+# DOMAIN CONFIGURATION
+# ═══════════════════════════════════════════════════
+
+domain:
+  # Primary domain
+  # Options:
+  #   - Real domain: yourdomain.com
+  #   - IP address: 159.223.73.110 (for testing)
+  #   - Localhost: localhost (for local testing)
+  primary: yourdomain.com
+  
+  # Email for SSL certificates
+  ssl_email: admin@yourdomain.com
+  
+  # SSL mode: staging or production
+  # Use 'staging' for testing (no rate limit)
+  # Use 'production' when ready
+  ssl_mode: staging
+
+# ═══════════════════════════════════════════════════
+# COMPONENTS TO INSTALL
+# ═══════════════════════════════════════════════════
+
+components:
+  # Core components (always installed):
+  # - nginx (reverse proxy)
+  # - postgresql (database with pgvector)
+  # - mongodb (document database)
+  # - redis (cache)
+  # - minio (object storage)
+  
+  # Optional components:
+  parse_server: true      # Backend-as-a-Service
+  monitoring: true        # Grafana + Prometheus
+  adminer: true          # Database UI
+
+# ═══════════════════════════════════════════════════
+# DATABASE CONFIGURATION
+# ═══════════════════════════════════════════════════
+
+database:
+  postgres:
+    version: "16"
+    # Leave empty to auto-generate secure password
+    password: ""
+  
+  mongodb:
+    version: "7"
+    password: ""
+  
+  redis:
+    version: "alpine"
+    password: ""
+
+# ═══════════════════════════════════════════════════
+# SECURITY SETTINGS
+# ═══════════════════════════════════════════════════
+
+security:
+  # Firewall ports to open
+  firewall:
+    - 22    # SSH
+    - 80    # HTTP
+    - 443   # HTTPS
+  
+  # SSH configuration
+  ssh:
+    disable_root_login: true
+    password_authentication: true  # Change to false after setting up SSH keys
+    max_auth_tries: 3
+  
+  # Fail2Ban (intrusion prevention)
+  fail2ban:
+    enabled: true
+    max_retry: 5
+    ban_time: 3600  # seconds
+
+# ═══════════════════════════════════════════════════
+# BACKUP CONFIGURATION
+# ═══════════════════════════════════════════════════
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 7
+
+# ═══════════════════════════════════════════════════
+# ADVANCED SETTINGS
+# ═══════════════════════════════════════════════════
+
+advanced:
+  # Docker network subnet
+  docker_subnet: "172.20.0.0/16"
+  
+  # Resource limits (leave empty for no limits)
+  postgres_memory: ""
+  mongodb_memory: ""
+  redis_memory: ""

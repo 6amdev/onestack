@@ -1,0 +1,69 @@
+# ═══════════════════════════════════════════════════
+# OneStack - Domain-Based Configuration
+# ═══════════════════════════════════════════════════
+#
+# Use this for production-like setup with domain
+# 
+# INSTRUCTIONS:
+# 1. Setup DNS first (A record pointing to your server)
+# 2. Copy this file: cp config.domain.example.yml config.yml
+# 3. Replace sixamdev.com with your domain
+# 4. Run installer: sudo bash install.sh
+#
+# ═══════════════════════════════════════════════════
+
+system:
+  admin_user: admin
+  onestack_user: onestack
+  install_dir: /opt/onestack
+  timezone: Asia/Bangkok
+
+domain:
+  # Replace with your domain
+  primary: sixamdev.com
+  ssl_email: admin@sixamdev.com
+  ssl_mode: staging  # Use 'staging' for testing, 'production' when ready
+
+components:
+  parse_server: true
+  monitoring: true
+  adminer: true
+
+database:
+  postgres:
+    version: "16"
+    password: ""
+  mongodb:
+    version: "7"
+    password: ""
+  redis:
+    version: "alpine"
+    password: ""
+
+security:
+  # Only need 80 and 443 with domain (Nginx handles routing)
+  firewall:
+    - 22     # SSH
+    - 80     # HTTP
+    - 443    # HTTPS
+  
+  ssh:
+    disable_root_login: true
+    password_authentication: true
+    max_auth_tries: 3
+  
+  fail2ban:
+    enabled: true
+    max_retry: 5
+    ban_time: 3600
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention_days: 7
+
+advanced:
+  docker_subnet: "172.20.0.0/16"
+  postgres_memory: ""
+  mongodb_memory: ""
+  redis_memory: ""

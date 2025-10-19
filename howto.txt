@@ -1,0 +1,101 @@
+# 1. Clone หรือ download OneStack
+cd ~
+git clone <onestack-repo>
+cd onestack
+
+# 2. สร้าง config
+cp config.example.yml config.yml
+nano config.yml
+
+# 3. ติดตั้ง
+sudo bash install.sh
+
+# 4. ทดสอบ
+sudo bash test-install.sh
+
+# 5. ดู credentials
+cat /opt/onestack/.credentials
+
+# 6. เข้าใช้งาน
+# เปิด browser ไปที่ http://localhost หรือ http://your-domain
+
+
+ขั้นตอนทดสอบแนะนำ:
+
+✅ แก้ config.yml (ใช้ localhost ก่อน)
+✅ รัน sudo bash install.sh
+✅ รอ 15-25 นาที
+✅ รัน sudo bash test-install.sh
+✅ เปิด browser ทดสอบ
+✅ รัน sudo bash uninstall.sh --dry-run
+✅ รัน sudo bash uninstall.sh (เลือก mode 3)
+✅ ติดตั้งใหม่อีกครั้ง
+
+
+🎯 ขั้นตอนการใช้งานจริง
+1. เตรียม Config
+bash# เลือก 1 ใน 3 แบบ:
+
+# แบบที่ 1: มี Domain
+cp config.domain.example.yml config.yml
+nano config.yml  # แก้ domain
+
+# แบบที่ 2: ใช้ IP
+cp config.ip.example.yml config.yml
+nano config.yml  # แก้ IP
+
+# แบบที่ 3: ทดสอบ localhost
+cp config.example.yml config.yml
+nano config.yml  # แก้เป็น localhost
+2. ติดตั้ง
+bashsudo bash install.sh
+3. ทดสอบ
+bashsudo bash test-install.sh
+4. ลบ (ถ้าต้องการ)
+bashsudo bash uninstall.sh --dry-run  # ดูก่อน
+sudo bash uninstall.sh            # ลบจริง
+```
+
+---
+
+## 📝 .gitignore
+
+สร้างไฟล์ `.gitignore`:
+```
+# User configuration (contains sensitive data)
+config.yml
+
+# Credentials
+.credentials
+
+# Logs
+*.log
+/var/log/
+
+# Installation state
+.onestack_install_state
+.onestack_vars
+
+# Backup files
+*.backup
+/backups/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+✅ สรุป
+ตอนนี้มี:
+
+✅ config.example.yml - Template หลัก
+✅ config.domain.example.yml - สำหรับ domain
+✅ config.ip.example.yml - สำหรับ IP testing
+✅ QUICKSTART.md - คู่มือเริ่มต้นอย่างเร็ว
+✅ .gitignore - ป้องกัน commit ข้อมูลสำคัญ
