@@ -137,6 +137,67 @@ create_onestack_user() {
     echo ""
 }
 
+create_installation_directory() {
+    print_header "Creating Installation Directory"
+    
+    local install_dir="$INSTALL_DIR"
+    
+    print_step "Creating directory: $install_dir"
+    
+    # Create main directory
+    if mkdir -p "$install_dir"; then
+        print_success "Directory created: $install_dir"
+    else
+        error_exit "Failed to create directory: $install_dir"
+    fi
+    
+    # Create subdirectories
+    print_step "Creating subdirectories..."
+    local subdirs=(
+        "nginx/conf.d"
+        "nginx/ssl"
+        "nginx/logs"
+        "databases/postgres/init"
+        "databases/mongodb/init"
+        "databases/redis"
+        "frontends/main"
+        "frontends/admin"
+        "backends"
+        "logs"
+        "backups"
+    )
+    
+    for subdir in "${subdirs[@]}"; do
+        mkdir -p "$install_dir/$subdir" 2>/dev/null || true
+    done
+    
+    print_success "Subdirectories created"
+    
+    # Set ownership to onestack user
+    if id "$ONESTACK_USER" &>/dev/null; then
+        print_step "Setting ownership to: $ONESTACK_USER"
+        chown -R "$ONESTACK_USER:$ONESTACK_USER" "$install_dir"
+        print_success "Ownership configured"
+    fi
+    
+    # Set permissions
+    chmod -R 755 "$install_dir"
+    chmod 700 "$install_dir/backups" 2>/dev/null || true
+    
+    # Verify
+    if [ -d "$install_dir" ] && [ -w "$install_dir" ]; then
+        print_success "Installation directory ready: $install_dir"
+    else
+        error_exit "Failed to verify installation directory"
+    fi
+    
+    # Save to state
+    save_var "INSTALL_DIR" "$install_dir"
+    save_var "INSTALLATION_DIRECTORY_CREATED" "true"
+    
+    echo ""
+}
+
 setup_ssh_keys() {
     print_header "SSH Key Setup"
     
