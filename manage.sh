@@ -1,10 +1,70 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack Management Console
+# OneStack Management Console v2.0
 # ═══════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/utils.sh"
+
+# ═══════════════════════════════════════════════════
+# Prerequisites Check
+# ═══════════════════════════════════════════════════
+
+check_prerequisites() {
+    local missing=0
+    
+    # Check yq
+    if ! command -v yq &> /dev/null; then
+        print_warning "yq not installed (needed for SSL setup)"
+        read -p "Install yq now? (Y/n): " install_yq
+        
+        if [ "$install_yq" != "n" ]; then
+            print_step "Installing yq..."
+            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+            chmod +x /usr/bin/yq
+            
+            if command -v yq &> /dev/null; then
+                print_success "yq installed successfully"
+            else
+                print_error "Failed to install yq"
+                missing=1
+            fi
+        else
+            print_warning "Some features may not work without yq"
+            missing=1
+        fi
+    fi
+    
+    # Check tasks directory
+    if [ ! -d "$SCRIPT_DIR/tasks" ]; then
+        print_warning "Tasks directory not found"
+        mkdir -p "$SCRIPT_DIR/tasks"
+        print_info "Created: $SCRIPT_DIR/tasks"
+        print_warning "Please upload task scripts"
+        missing=1
+    else
+        # Count task scripts
+        local task_count=$(find "$SCRIPT_DIR/tasks" -name "*.sh" -type f 2>/dev/null | wc -l)
+        if [ "$task_count" -eq 0 ]; then
+            print_warning "No task scripts found (0 tasks)"
+            print_info "Some menu options will not work"
+            missing=1
+        fi
+    fi
+    
+    # Check lib/06-ssl.sh for SSL features
+    if [ ! -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
+        print_warning "lib/06-ssl.sh not found (SSL features unavailable)"
+        missing=1
+    fi
+    
+    # Continue anyway if user wants
+    if [ "$missing" -eq 1 ]; then
+        echo ""
+        read -p "Continue anyway? (Y/n): " cont
+        [ "$cont" = "n" ] && exit 0
+    fi
+}
 
 # ═══════════════════════════════════════════════════
 # Check if OneStack is installed
@@ -24,16 +84,75 @@ check_installation() {
 }
 
 # ═══════════════════════════════════════════════════
+# Task Runner with Error Handling
+# ═══════════════════════════════════════════════════
+
+run_task() {
+    local task_name=$1
+    local task_file="$SCRIPT_DIR/tasks/${task_name}.sh"
+    
+    clear
+    
+    if [ -f "$task_file" ]; then
+        # Check if executable
+        if [ ! -x "$task_file" ]; then
+            chmod +x "$task_file"
+        fi
+        
+        # Run task
+        bash "$task_file"
+        local exit_code=$?
+        
+        # Handle exit code
+        if [ $exit_code -ne 0 ]; then
+            echo ""
+            print_error "Task exited with error code: $exit_code"
+        fi
+        
+        return $exit_code
+    else
+        print_error "Task not available: ${task_name}"
+        echo ""
+        print_info "File not found: $task_file"
+        echo ""
+        print_warning "This feature requires task scripts"
+        echo ""
+        print_info "Available tasks:"
+        
+        if [ -d "$SCRIPT_DIR/tasks" ]; then
+            local available=$(find "$SCRIPT_DIR/tasks" -name "*.sh" -type f 2>/dev/null)
+            if [ -n "$available" ]; then
+                echo "$available" | while read file; do
+                    echo "  ✓ $(basename "$file" .sh)"
+                done
+            else
+                echo "  (none - please upload task scripts)"
+            fi
+        else
+            echo "  (tasks directory not found)"
+        fi
+        
+        echo ""
+        print_info "Upload location: $SCRIPT_DIR/tasks/"
+        
+        return 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════
 # Show Service Status
 # ═══════════════════════════════════════════════════
 
 show_service_status() {
-    cd /opt/onestack
-    
-    echo ""
-    print_info "Service Status:"
-    docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | head -12
-    echo ""
+    if [ -d "/opt/onestack" ] && [ -f "/opt/onestack/docker-compose.yml" ]; then
+        cd /opt/onestack
+        
+        echo ""
+        print_info "Service Status:"
+        docker compose ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | head -12 || \
+            echo "  (Unable to get service status)"
+        echo ""
+    fi
 }
 
 # ═══════════════════════════════════════════════════
@@ -44,7 +163,7 @@ show_main_menu() {
     clear
     cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════════╗
-║              OneStack Management Console v1.0                 ║
+║              OneStack Management Console v2.0                 ║
 ╠═══════════════════════════════════════════════════════════════╣
 EOF
     
@@ -95,39 +214,6 @@ EOF
 # Menu Handler
 # ═══════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════
-# Task Runner Helper
-# ═══════════════════════════════════════════════════
-
-run_task() {
-    local task_name=$1
-    local task_file="$SCRIPT_DIR/tasks/${task_name}.sh"
-    
-    if [ -f "$task_file" ]; then
-        bash "$task_file"
-    else
-        print_error "Task not available: ${task_name}"
-        print_info "File not found: $task_file"
-        echo ""
-        print_warning "This feature requires task scripts to be installed"
-        print_info "Please upload task scripts to: $SCRIPT_DIR/tasks/"
-        
-        # Show what's available
-        if [ -d "$SCRIPT_DIR/tasks" ]; then
-            local available=$(ls -1 "$SCRIPT_DIR/tasks/"*.sh 2>/dev/null | wc -l)
-            if [ "$available" -gt 0 ]; then
-                echo ""
-                print_info "Available tasks:"
-                ls -1 "$SCRIPT_DIR/tasks/"*.sh 2>/dev/null | xargs -n1 basename
-            fi
-        fi
-    fi
-}
-
-# ═══════════════════════════════════════════════════
-# Menu Handler
-# ═══════════════════════════════════════════════════
-
 handle_menu_choice() {
     case $1 in
         # SSL Management
@@ -150,12 +236,12 @@ handle_menu_choice() {
         11) run_task "service-reset" ;;
         12) run_task "cleanup" ;;
         
-        # Information (these work without task files)
+        # Information (built-in, no task file needed)
         13) show_credentials ;;
         14) show_urls ;;
         15) check_updates ;;
         
-        # Other (these work without task files)
+        # Other (built-in, no task file needed)
         16) restart_all_services ;;
         17) stop_all_services ;;
         18) exit 0 ;;
@@ -172,7 +258,7 @@ handle_menu_choice() {
 }
 
 # ═══════════════════════════════════════════════════
-# Quick Actions
+# Quick Actions (Built-in)
 # ═══════════════════════════════════════════════════
 
 show_credentials() {
@@ -183,6 +269,7 @@ show_credentials() {
         cat /opt/onestack/.credentials
     else
         print_error "Credentials file not found"
+        print_info "Expected: /opt/onestack/.credentials"
     fi
     
     echo ""
@@ -197,6 +284,7 @@ show_urls() {
     
     if [ -z "$DOMAIN" ]; then
         DOMAIN="sixamdev.com"
+        print_warning "Domain not found in .env, using default"
     fi
     
     # Check if SSL is configured
@@ -219,6 +307,18 @@ show_urls() {
     echo "  Grafana:         $PROTOCOL://monitor.$DOMAIN"
     echo "  Prometheus:      $PROTOCOL://prometheus.$DOMAIN"
     echo "  Adminer:         $PROTOCOL://db.$DOMAIN"
+    echo ""
+    
+    # Test URLs
+    print_info "Testing accessibility..."
+    for url in "$PROTOCOL://$DOMAIN" "$PROTOCOL://api.$DOMAIN/parse/health"; do
+        local status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>&1)
+        if [[ "$status" =~ ^[23] ]]; then
+            echo "  ✅ $url"
+        else
+            echo "  ❌ $url (HTTP $status)"
+        fi
+    done
 }
 
 check_updates() {
@@ -234,6 +334,7 @@ check_updates() {
 }
 
 restart_all_services() {
+    clear
     print_header "Restart All Services"
     
     read -p "This will restart all OneStack services. Continue? (y/N): " confirm
@@ -241,14 +342,19 @@ restart_all_services() {
     if [ "$confirm" = "y" ]; then
         print_step "Restarting all services..."
         cd /opt/onestack
-        docker compose restart
         
-        print_success "All services restarted"
-        sleep 3
+        if docker compose restart 2>/dev/null; then
+            print_success "All services restarted"
+            sleep 3
+        else
+            print_error "Failed to restart services"
+            sleep 3
+        fi
     fi
 }
 
 stop_all_services() {
+    clear
     print_header "Stop All Services"
     
     print_warning "This will stop all OneStack services"
@@ -257,21 +363,31 @@ stop_all_services() {
     if [ "$confirm" = "y" ]; then
         print_step "Stopping all services..."
         cd /opt/onestack
-        docker compose down
         
-        print_success "All services stopped"
-        print_info "To start again: cd /opt/onestack && docker compose up -d"
-        
-        read -p "Press Enter to exit..."
-        exit 0
+        if docker compose down 2>/dev/null; then
+            print_success "All services stopped"
+            print_info "To start again: cd /opt/onestack && docker compose up -d"
+            
+            read -p "Press Enter to exit..."
+            exit 0
+        else
+            print_error "Failed to stop services"
+            sleep 3
+        fi
     fi
 }
 
 # ═══════════════════════════════════════════════════
-# Main
+# Main Entry Point
 # ═══════════════════════════════════════════════════
 
-check_root
-check_installation
+main() {
+    check_root
+    check_installation
+    check_prerequisites
+    
+    show_main_menu
+}
 
-show_main_menu
+# Run
+main

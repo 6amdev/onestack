@@ -1,11 +1,90 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack - SSL Setup Task
+# OneStack - SSL Setup Task (Fixed)
 # ═══════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh"
-source "$SCRIPT_DIR/lib/06-ssl.sh"
+
+# Source utilities
+if [ -f "$SCRIPT_DIR/lib/utils.sh" ]; then
+    source "$SCRIPT_DIR/lib/utils.sh"
+else
+    echo "ERROR: utils.sh not found"
+    exit 1
+fi
+
+# Source SSL functions
+if [ -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
+    source "$SCRIPT_DIR/lib/06-ssl.sh"
+else
+    print_error "lib/06-ssl.sh not found"
+    print_info "SSL functions library is required"
+    print_info "Expected: $SCRIPT_DIR/lib/06-ssl.sh"
+    exit 1
+fi
+
+# ═══════════════════════════════════════════════════
+# Check Prerequisites
+# ═══════════════════════════════════════════════════
+
+check_prerequisites() {
+    local missing=0
+    
+    # Check yq
+    if ! command -v yq &> /dev/null; then
+        print_warning "yq not installed"
+        read -p "Install yq now? (Y/n): " install
+        
+        if [ "$install" != "n" ]; then
+            print_step "Installing yq..."
+            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+            chmod +x /usr/bin/yq
+            
+            if command -v yq &> /dev/null; then
+                print_success "yq installed"
+            else
+                print_error "Failed to install yq"
+                return 1
+            fi
+        else
+            return 1
+        fi
+    fi
+    
+    # Check certbot
+    if ! command -v certbot &> /dev/null; then
+        print_info "certbot will be installed during SSL setup"
+    fi
+    
+    return 0
+}
+
+# ═══════════════════════════════════════════════════
+# Read Configuration
+# ═══════════════════════════════════════════════════
+
+read_config() {
+    local config_file=$1
+    
+    print_step "Reading configuration..."
+    
+    # Try yq first
+    local domain=$(yq eval '.domain.primary' "$config_file" 2>/dev/null)
+    local email=$(yq eval '.domain.ssl_email' "$config_file" 2>/dev/null)
+    local mode=$(yq eval '.domain.ssl_mode' "$config_file" 2>/dev/null)
+    
+    # Fallback to grep if yq failed
+    if [ -z "$domain" ] || [ "$domain" = "null" ]; then
+        print_warning "yq failed, using grep fallback..."
+        
+        domain=$(grep "^\s*primary:" "$config_file" | sed 's/.*primary:\s*//' | tr -d '"' | tr -d "'" | head -1)
+        email=$(grep "^\s*ssl_email:" "$config_file" | sed 's/.*ssl_email:\s*//' | tr -d '"' | tr -d "'" | head -1)
+        mode=$(grep "^\s*ssl_mode:" "$config_file" | sed 's/.*ssl_mode:\s*//' | tr -d '"' | tr -d "'" | tr -d '#' | awk '{print $1}' | head -1)
+    fi
+    
+    # Return values via echo
+    echo "$domain|$email|$mode"
+}
 
 # ═══════════════════════════════════════════════════
 # Main SSL Setup
@@ -14,39 +93,72 @@ source "$SCRIPT_DIR/lib/06-ssl.sh"
 main() {
     print_header "SSL Certificate Setup"
     
-    # Check if already configured
-    local CONFIG_FILE="$SCRIPT_DIR/config.yml"
-    
-    if [ ! -f "$CONFIG_FILE" ]; then
-        # Try alternate location
-        CONFIG_FILE="/root/onestack/config.yml"
+    # Check prerequisites
+    if ! check_prerequisites; then
+        print_error "Prerequisites not met"
+        print_info "yq is required for SSL setup"
+        exit 1
     fi
     
-    if [ ! -f "$CONFIG_FILE" ]; then
-        print_error "Config file not found: config.yml"
-        print_info "Expected location: $SCRIPT_DIR/config.yml"
+    # Find config file
+    print_step "Looking for config.yml..."
+    
+    local CONFIG_FILE=""
+    local search_paths=(
+        "$SCRIPT_DIR/config.yml"
+        "/root/onestack/config.yml"
+        "/opt/onestack/config.yml"
+    )
+    
+    for path in "${search_paths[@]}"; do
+        if [ -f "$path" ]; then
+            CONFIG_FILE="$path"
+            print_success "Found: $CONFIG_FILE"
+            break
+        fi
+    done
+    
+    if [ -z "$CONFIG_FILE" ]; then
+        print_error "Config file not found"
+        echo ""
+        print_info "Searched locations:"
+        for path in "${search_paths[@]}"; do
+            echo "  • $path"
+        done
+        echo ""
+        print_info "Create config.yml from template:"
+        echo "  cp config.domain.example.yml config.yml"
         exit 1
     fi
     
     # Read configuration
-    local DOMAIN=$(yq eval '.domain.primary' "$CONFIG_FILE" 2>/dev/null)
-    local SSL_EMAIL=$(yq eval '.domain.ssl_email' "$CONFIG_FILE" 2>/dev/null)
-    local SSL_MODE=$(yq eval '.domain.ssl_mode' "$CONFIG_FILE" 2>/dev/null)
+    local config_values=$(read_config "$CONFIG_FILE")
+    local DOMAIN=$(echo "$config_values" | cut -d'|' -f1)
+    local SSL_EMAIL=$(echo "$config_values" | cut -d'|' -f2)
+    local SSL_MODE=$(echo "$config_values" | cut -d'|' -f3)
     
-    # Validate
+    # Validate domain
     if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "null" ]; then
         print_error "Domain not configured in config.yml"
+        echo ""
+        print_info "Edit: $CONFIG_FILE"
+        print_info "Set domain.primary to your domain"
         exit 1
     fi
     
+    # Validate email
     if [ -z "$SSL_EMAIL" ] || [ "$SSL_EMAIL" = "null" ]; then
         print_error "SSL email not configured in config.yml"
+        echo ""
+        print_info "Edit: $CONFIG_FILE"
+        print_info "Set domain.ssl_email to your email"
         exit 1
     fi
     
+    # Default mode
     if [ -z "$SSL_MODE" ] || [ "$SSL_MODE" = "null" ]; then
-        SSL_MODE="production"
-        print_warning "SSL mode not specified, using: production"
+        SSL_MODE="staging"
+        print_warning "SSL mode not specified, using: staging"
     fi
     
     # Show configuration
@@ -62,7 +174,12 @@ main() {
         print_warning "SSL certificate already exists for $DOMAIN"
         
         # Show expiry
-        check_ssl_expiry "$DOMAIN"
+        if command -v openssl &> /dev/null; then
+            local expiry=$(openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/cert.pem" -noout -enddate 2>/dev/null | cut -d= -f2)
+            if [ -n "$expiry" ]; then
+                print_info "Expires: $expiry"
+            fi
+        fi
         
         echo ""
         read -p "Recreate certificate? (y/N): " recreate
@@ -76,15 +193,24 @@ main() {
     # DNS Check
     print_step "Checking DNS configuration..."
     
-    local DNS_IP=$(dig +short "$DOMAIN" | tail -1)
-    local SERVER_IP=$(curl -s ifconfig.me)
+    local DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | tail -1)
+    local SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null)
+    
+    if [ -z "$DNS_IP" ]; then
+        print_warning "Could not resolve domain"
+    fi
+    
+    if [ -z "$SERVER_IP" ]; then
+        print_warning "Could not determine server IP"
+        SERVER_IP="(unknown)"
+    fi
     
     echo "  Domain:    $DOMAIN"
-    echo "  DNS IP:    $DNS_IP"
+    echo "  DNS IP:    ${DNS_IP:-(not resolved)}"
     echo "  Server IP: $SERVER_IP"
     echo ""
     
-    if [ "$DNS_IP" != "$SERVER_IP" ]; then
+    if [ -n "$DNS_IP" ] && [ -n "$SERVER_IP" ] && [ "$DNS_IP" != "$SERVER_IP" ]; then
         print_error "DNS is not pointing to this server!"
         print_info "Please configure DNS first:"
         print_info "  A    @    $SERVER_IP"
@@ -92,8 +218,12 @@ main() {
         echo ""
         read -p "Continue anyway? (y/N): " force
         [ "$force" != "y" ] && exit 1
-    else
+    elif [ -n "$DNS_IP" ] && [ "$DNS_IP" = "$SERVER_IP" ]; then
         print_success "DNS is correctly configured"
+    else
+        print_warning "Could not verify DNS configuration"
+        read -p "Continue anyway? (y/N): " force
+        [ "$force" != "y" ] && exit 1
     fi
     
     # Mode confirmation
@@ -122,6 +252,10 @@ main() {
         fi
     else
         print_info "Using STAGING mode (test certificates)"
+        print_warning "Browsers will not trust these certificates"
+        echo ""
+        read -p "Continue? (Y/n): " confirm
+        [ "$confirm" = "n" ] && exit 0
     fi
     
     # Pre-flight checks
@@ -130,13 +264,16 @@ main() {
     # Check port 80
     if ! nc -z localhost 80 2>/dev/null; then
         print_error "Port 80 is not accessible"
-        print_info "Make sure Nginx is running"
+        print_info "Make sure Nginx is running:"
+        print_info "  docker compose -f /opt/onestack/docker-compose.yml ps nginx"
         exit 1
     fi
     
     # Check webroot
     if [ ! -d "/opt/onestack/frontends/main" ]; then
         print_error "Webroot not found: /opt/onestack/frontends/main"
+        print_info "Create the directory:"
+        print_info "  mkdir -p /opt/onestack/frontends/main"
         exit 1
     fi
     
@@ -170,20 +307,38 @@ main() {
         echo ""
         print_info "Auto-renewal is configured (runs twice daily)"
         echo ""
-        print_info "Test your SSL grade:"
-        echo "  https://www.ssllabs.com/ssltest/analyze.html?d=$DOMAIN"
+        
+        if [ "$SSL_MODE" = "production" ]; then
+            print_info "Test your SSL grade:"
+            echo "  https://www.ssllabs.com/ssltest/analyze.html?d=$DOMAIN"
+        else
+            print_warning "STAGING MODE - Certificates are not trusted by browsers"
+            print_info "To get real certificates, change ssl_mode to 'production'"
+        fi
+        
         echo ""
         
         # Update Parse Server URL
-        print_step "Updating Parse Server public URL..."
-        sed -i "s|http://api.$DOMAIN|https://api.$DOMAIN|g" /opt/onestack/.env
-        docker compose -f /opt/onestack/docker-compose.yml restart parse-server
+        if grep -q "http://api.$DOMAIN" /opt/onestack/.env 2>/dev/null; then
+            print_step "Updating Parse Server public URL..."
+            sed -i "s|http://api.$DOMAIN|https://api.$DOMAIN|g" /opt/onestack/.env
+            
+            if docker compose -f /opt/onestack/docker-compose.yml restart parse-server 2>/dev/null; then
+                print_success "Parse Server updated"
+            fi
+        fi
         
         print_success "Setup complete!"
     else
         echo ""
         print_error "SSL setup failed"
         print_info "Check the errors above and try again"
+        echo ""
+        print_info "Common issues:"
+        echo "  • DNS not configured correctly"
+        echo "  • Port 80 blocked by firewall"
+        echo "  • Nginx not running"
+        echo "  • Rate limit exceeded (use staging mode)"
         exit 1
     fi
 }
