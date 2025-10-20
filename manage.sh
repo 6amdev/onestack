@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack Management Console v2.2
+# OneStack Management Console v2.3
 # ═══════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -157,7 +157,7 @@ show_main_menu() {
     clear
     cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════════╗
-║           OneStack Management Console v2.2                    ║
+║           OneStack Management Console v2.3                    ║
 ╠═══════════════════════════════════════════════════════════════╣
 EOF
     
@@ -172,39 +172,49 @@ Management Tasks:
   2) Renew SSL certificates
   3) Check SSL status
 
+🚀 Install Additional Services:
+  4) Setup Node.js API Template
+  5) Setup Python FastAPI Template
+  6) Setup Python RAG System (AI)
+  7) Setup Ollama (Local LLM)
+  8) Setup ChromaDB (Vector DB)
+  9) Setup n8n (Automation)
+  10) Setup Chatwoot (Support)
+  11) Setup Backup System
+
 🔧 Service Management:
-  4) Restart service
-  5) View service logs
-  6) Check service health
+  12) Restart service
+  13) View service logs
+  14) Check service health
+  15) 🧪 Test all services
+  16) ✅ Validate installation
 
 💾 System Maintenance:
-  7) Create backup
-  8) System health check
-  9) View system status
-  10) 🧪 Test all services (comprehensive)
-  11) ✅ Validate installation
+  17) Create backup
+  18) System health check
+  19) View system status
 
 🛠️ Troubleshooting:
-  12) Fix Parse Dashboard
-  13) Reset service
-  14) Clean up resources
-  15) 🔧 Quick Fix (auto-repair issues)
-  16) 📝 Fix .env configuration
+  20) Fix Parse Dashboard
+  21) Reset service
+  22) Clean up resources
+  23) 🔧 Quick Fix (auto-repair)
+  24) 📝 Fix .env configuration
 
 📚 Information:
-  17) Show credentials
-  18) Show URLs
-  19) Check for updates
+  25) Show credentials
+  26) Show URLs
+  27) Check for updates
 
 🚪 Other:
-  20) Restart all services
-  21) Stop all services
-  22) Exit
+  28) Restart all services
+  29) Stop all services
+  30) Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
     
-    read -p "Enter choice [1-22]: " choice
+    read -p "Enter choice [1-30]: " choice
     handle_menu_choice "$choice"
 }
 
@@ -219,34 +229,44 @@ handle_menu_choice() {
         2)  run_task "ssl-renew" ;;
         3)  run_task "ssl-status" ;;
         
+        # Install Additional Services
+        4)  run_task "setup-nodejs-api" ;;
+        5)  run_task "setup-python-api" ;;
+        6)  run_task "setup-python-rag" ;;
+        7)  run_task "setup-ollama" ;;
+        8)  run_task "setup-chromadb" ;;
+        9)  run_task "setup-n8n" ;;
+        10) run_task "setup-chatwoot" ;;
+        11) run_task "setup-backup" ;;
+        
         # Service Management
-        4)  run_task "service-restart" ;;
-        5)  run_task "service-logs" ;;
-        6)  run_task "health-check" ;;
+        12) run_task "service-restart" ;;
+        13) run_task "service-logs" ;;
+        14) run_task "health-check" ;;
+        15) run_task "test-services" ;;
+        16) run_task "validate-install" ;;
         
         # System Maintenance
-        7)  run_task "backup-create" ;;
-        8)  run_task "health-check" ;;
-        9)  run_task "system-status" ;;
-        10) run_task "test-services" ;;
-        11) run_task "validate-install" ;;
+        17) run_task "backup-create" ;;
+        18) run_task "health-check" ;;
+        19) run_task "system-status" ;;
         
         # Troubleshooting
-        12) run_task "fix-parse-dashboard" ;;
-        13) run_task "service-reset" ;;
-        14) run_task "cleanup" ;;
-        15) run_task "quick-fix" ;;
-        16) run_task "fix-env" ;;
+        20) run_task "fix-parse-dashboard" ;;
+        21) run_task "service-reset" ;;
+        22) run_task "cleanup" ;;
+        23) run_task "quick-fix" ;;
+        24) run_task "fix-env" ;;
         
         # Information
-        17) show_credentials ;;
-        18) show_urls ;;
-        19) check_updates ;;
+        25) show_credentials ;;
+        26) show_urls ;;
+        27) check_updates ;;
         
         # Other
-        20) restart_all_services ;;
-        21) stop_all_services ;;
-        22) exit 0 ;;
+        28) restart_all_services ;;
+        29) stop_all_services ;;
+        30) exit 0 ;;
         
         *)  
             print_error "Invalid choice"
@@ -303,15 +323,49 @@ show_urls() {
     echo "  Main Site:       $PROTOCOL://$DOMAIN"
     echo "  MinIO Console:   $PROTOCOL://storage.$DOMAIN"
     echo "  MinIO S3 API:    $PROTOCOL://s3.$DOMAIN"
-    echo "  Parse Server:    $PROTOCOL://api.$DOMAIN/parse"
-    echo "  Parse Dashboard: $PROTOCOL://api.$DOMAIN"
-    echo "  Grafana:         $PROTOCOL://monitor.$DOMAIN"
-    echo "  Prometheus:      $PROTOCOL://prometheus.$DOMAIN"
-    echo "  Adminer:         $PROTOCOL://db.$DOMAIN"
+    
+    # Check which services are installed
+    if docker ps | grep -q "nodejs-api"; then
+        echo "  Node.js API:     $PROTOCOL://api.$DOMAIN/v1"
+    fi
+    
+    if docker ps | grep -q "python-api"; then
+        echo "  Python API:      $PROTOCOL://api.$DOMAIN/v2"
+    fi
+    
+    if docker ps | grep -q "python-rag"; then
+        echo "  RAG API:         $PROTOCOL://ai.$DOMAIN"
+    fi
+    
+    if docker ps | grep -q "parse-server"; then
+        echo "  Parse Server:    $PROTOCOL://api.$DOMAIN/parse"
+        echo "  Parse Dashboard: $PROTOCOL://api.$DOMAIN"
+    fi
+    
+    if docker ps | grep -q "grafana"; then
+        echo "  Grafana:         $PROTOCOL://monitor.$DOMAIN"
+    fi
+    
+    if docker ps | grep -q "prometheus"; then
+        echo "  Prometheus:      $PROTOCOL://prometheus.$DOMAIN"
+    fi
+    
+    if docker ps | grep -q "adminer"; then
+        echo "  Adminer:         $PROTOCOL://db.$DOMAIN"
+    fi
+    
+    if docker ps | grep -q "n8n"; then
+        echo "  n8n:             $PROTOCOL://flow.$DOMAIN"
+    fi
+    
+    if docker ps | grep -q "chatwoot"; then
+        echo "  Chatwoot:        $PROTOCOL://chat.$DOMAIN"
+    fi
+    
     echo ""
     
     print_info "Testing accessibility..."
-    for url in "$PROTOCOL://$DOMAIN" "$PROTOCOL://api.$DOMAIN/parse/health"; do
+    for url in "$PROTOCOL://$DOMAIN" "$PROTOCOL://storage.$DOMAIN"; do
         local status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>&1)
         if [[ "$status" =~ ^[23] ]]; then
             echo "  ✅ $url"
@@ -325,7 +379,7 @@ check_updates() {
     clear
     print_header "Check for Updates"
     
-    print_info "Current OneStack version: 1.0.0"
+    print_info "Current OneStack version: 2.3.0"
     print_info "Checking for updates..."
     
     print_warning "Update check not implemented yet"
