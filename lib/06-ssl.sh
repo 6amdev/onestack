@@ -1,221 +1,243 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# Task: SSL Setup
-# Description: Setup SSL certificates with Let's Encrypt
+# OneStack SSL Management Library
 # ═══════════════════════════════════════════════════
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh"
-
-# Source SSL functions
-if [ -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
-    source "$SCRIPT_DIR/lib/06-ssl.sh"
-else
-    print_error "SSL library not found: $SCRIPT_DIR/lib/06-ssl.sh"
-    exit 1
-fi
+# Get library directory
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$LIB_DIR/utils.sh"
 
 # ═══════════════════════════════════════════════════
-# Main SSL Setup
+# SSL Certificate Management Functions
 # ═══════════════════════════════════════════════════
 
-main() {
-    clear
-    print_header "SSL Certificate Setup"
+install_certbot() {
+    print_step "Installing Certbot..."
     
-    # Check if OneStack is installed
-    if [ ! -d "/opt/onestack" ]; then
-        print_error "OneStack not installed"
-        exit 1
+    if command -v certbot &> /dev/null; then
+        print_success "Certbot already installed"
+        certbot --version
+        return 0
     fi
     
-    # Get domain from .env
-    cd /opt/onestack
-    local DOMAIN=$(grep "^DOMAIN=" .env 2>/dev/null | cut -d= -f2)
+    # Install Certbot
+    apt-get update -qq
+    apt-get install -y certbot python3-certbot-nginx -qq
     
-    if [ -z "$DOMAIN" ]; then
-        echo ""
-        print_warning "Domain not configured in .env"
-        echo ""
-        read -p "Enter your domain name (e.g., example.com): " DOMAIN
-        
-        if [ -z "$DOMAIN" ]; then
-            print_error "Domain is required"
-            exit 1
-        fi
-        
-        # Add to .env
-        echo "" >> .env
-        echo "# Domain Configuration" >> .env
-        echo "DOMAIN=$DOMAIN" >> .env
-        print_success "Added DOMAIN to .env"
-    fi
-    
-    echo ""
-    print_info "Domain: $DOMAIN"
-    
-    # Get email for Let's Encrypt
-    local EMAIL=$(grep "^SSL_EMAIL=" .env 2>/dev/null | cut -d= -f2)
-    
-    if [ -z "$EMAIL" ]; then
-        echo ""
-        read -p "Enter email for SSL notifications: " EMAIL
-        
-        if [ -z "$EMAIL" ]; then
-            print_error "Email is required for Let's Encrypt"
-            exit 1
-        fi
-        
-        # Add to .env
-        echo "SSL_EMAIL=$EMAIL" >> .env
-        print_success "Added SSL_EMAIL to .env"
-    fi
-    
-    echo ""
-    print_info "Email: $EMAIL"
-    
-    # Check DNS
-    echo ""
-    print_header "DNS Verification"
-    
-    print_step "Checking DNS records for $DOMAIN..."
-    
-    local SERVER_IP=$(curl -s ifconfig.me)
-    local DOMAIN_IP=$(dig +short "$DOMAIN" | tail -n1)
-    
-    echo "  Server IP: $SERVER_IP"
-    echo "  Domain IP: $DOMAIN_IP"
-    
-    if [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
-        echo ""
-        print_warning "DNS mismatch detected!"
-        echo ""
-        echo "Required DNS Records:"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Type    Host    Value"
-        echo "  A       @       $SERVER_IP"
-        echo "  A       *       $SERVER_IP"
-        echo "  CNAME   www     @"
-        echo ""
-        
-        if ! confirm "Continue with SSL setup anyway?"; then
-            print_info "SSL setup cancelled"
-            exit 0
-        fi
+    if command -v certbot &> /dev/null; then
+        print_success "Certbot installed successfully"
+        certbot --version
+        return 0
     else
-        print_success "DNS is correctly configured"
-    fi
-    
-    # SSL setup mode
-    echo ""
-    print_header "SSL Setup Mode"
-    echo ""
-    echo "Choose SSL setup mode:"
-    echo "  1) Wildcard certificate (*.domain.com) - Recommended"
-    echo "  2) Individual certificates per subdomain"
-    echo "  0) Cancel"
-    echo ""
-    
-    read -p "Select mode [1-2]: " mode
-    
-    case $mode in
-        1)
-            SSL_MODE="wildcard"
-            print_info "Using wildcard mode"
-            ;;
-        2)
-            SSL_MODE="individual"
-            print_info "Using individual mode"
-            ;;
-        0)
-            print_info "Cancelled"
-            exit 0
-            ;;
-        *)
-            print_error "Invalid choice"
-            exit 1
-            ;;
-    esac
-    
-    # Confirm
-    echo ""
-    print_warning "This will:"
-    echo "  1. Install Certbot"
-    echo "  2. Request SSL certificates from Let's Encrypt"
-    echo "  3. Configure Nginx for HTTPS"
-    echo "  4. Setup auto-renewal"
-    echo ""
-    
-    if ! confirm "Continue with SSL setup?"; then
-        print_info "SSL setup cancelled"
-        exit 0
-    fi
-    
-    # Run setup if function exists
-    if type setup_ssl &>/dev/null; then
-        echo ""
-        setup_ssl "$DOMAIN" "$EMAIL" "$SSL_MODE"
-        
-        if [ $? -eq 0 ]; then
-            echo ""
-            print_success "SSL setup completed successfully!"
-            echo ""
-            print_info "Your sites are now accessible via HTTPS:"
-            echo "  ✅ https://$DOMAIN"
-            echo "  ✅ https://storage.$DOMAIN"
-            echo "  ✅ https://api.$DOMAIN"
-            echo "  ✅ https://monitor.$DOMAIN"
-            echo ""
-            print_info "Test your SSL: https://www.ssllabs.com/ssltest/analyze.html?d=$DOMAIN"
-        else
-            echo ""
-            print_error "SSL setup failed"
-            exit 1
-        fi
-    else
-        # Fallback if setup_ssl doesn't exist
-        print_warning "setup_ssl function not found, using fallback method"
-        echo ""
-        
-        # Simple SSL setup
-        print_step "Installing Certbot..."
-        if ! command -v certbot &> /dev/null; then
-            apt-get update -qq
-            apt-get install -y certbot python3-certbot-nginx -qq
-            print_success "Certbot installed"
-        else
-            print_success "Certbot already installed"
-        fi
-        
-        echo ""
-        print_step "Requesting SSL certificate..."
-        
-        if [ "$SSL_MODE" = "wildcard" ]; then
-            print_info "Wildcard certificates require DNS validation"
-            print_info "Manual setup required. Please run:"
-            echo ""
-            echo "  certbot certonly --manual --preferred-challenges dns \\"
-            echo "    -d $DOMAIN -d *.$DOMAIN \\"
-            echo "    --email $EMAIL --agree-tos"
-        else
-            certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" \
-                -d "storage.$DOMAIN" -d "s3.$DOMAIN" \
-                -d "api.$DOMAIN" -d "monitor.$DOMAIN" \
-                -d "prometheus.$DOMAIN" -d "db.$DOMAIN" \
-                --email "$EMAIL" --agree-tos --non-interactive
-            
-            if [ $? -eq 0 ]; then
-                print_success "SSL certificates obtained"
-                
-                # Setup auto-renewal
-                (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 2,14 * * * certbot renew --quiet") | crontab -
-                print_success "Auto-renewal configured"
-            else
-                print_error "Failed to obtain SSL certificates"
-                exit 1
-            fi
-        fi
+        print_error "Failed to install Certbot"
+        return 1
     fi
 }
 
-main "$@"
+request_ssl_certificate() {
+    local domain=$1
+    local email=$2
+    local subdomains=$3
+    
+    print_step "Requesting SSL certificate for $domain..."
+    
+    # Build domain list
+    local domain_args="-d $domain -d www.$domain"
+    
+    if [ -n "$subdomains" ]; then
+        for sub in $subdomains; do
+            domain_args="$domain_args -d ${sub}.${domain}"
+        done
+    fi
+    
+    # Request certificate
+    certbot certonly --nginx \
+        $domain_args \
+        --email "$email" \
+        --agree-tos \
+        --non-interactive \
+        --redirect
+    
+    if [ $? -eq 0 ]; then
+        print_success "SSL certificate obtained"
+        return 0
+    else
+        print_error "Failed to obtain SSL certificate"
+        return 1
+    fi
+}
+
+setup_ssl_auto_renewal() {
+    print_step "Setting up SSL auto-renewal..."
+    
+    # Create renewal script
+    local renewal_script="/opt/onestack/scripts/ssl-renew.sh"
+    mkdir -p /opt/onestack/scripts
+    
+    cat > "$renewal_script" << 'RENEWAL_SCRIPT'
+#!/bin/bash
+# SSL Certificate Auto-Renewal
+
+LOG_FILE="/opt/onestack/logs/ssl-renewal.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting SSL renewal..." >> "$LOG_FILE"
+
+certbot renew --quiet --deploy-hook "docker exec onestack-nginx nginx -s reload" >> "$LOG_FILE" 2>&1
+
+if [ $? -eq 0 ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Renewal completed successfully" >> "$LOG_FILE"
+else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Renewal failed" >> "$LOG_FILE"
+fi
+RENEWAL_SCRIPT
+
+    chmod +x "$renewal_script"
+    
+    # Add to crontab
+    (crontab -l 2>/dev/null | grep -v "ssl-renew.sh"; echo "0 2,14 * * * $renewal_script") | crontab -
+    
+    print_success "Auto-renewal configured"
+    print_info "Renewal check: Twice daily at 2 AM and 2 PM"
+}
+
+setup_ssl() {
+    local domain=$1
+    local email=$2
+    local mode=${3:-"individual"}
+    
+    print_header "SSL Certificate Setup"
+    
+    # Validate inputs
+    if [ -z "$domain" ] || [ -z "$email" ]; then
+        print_error "Domain and email are required"
+        return 1
+    fi
+    
+    print_info "Domain: $domain"
+    print_info "Email: $email"
+    print_info "Mode: $mode"
+    echo ""
+    
+    # Step 1: Install Certbot
+    install_certbot || return 1
+    
+    echo ""
+    
+    # Step 2: Request certificates
+    if [ "$mode" = "wildcard" ]; then
+        print_warning "Wildcard certificates require DNS validation"
+        print_info "Run manually: certbot certonly --manual --preferred-challenges dns -d $domain -d *.$domain"
+        return 1
+    else
+        # Individual certificates for each subdomain
+        local subdomains="storage s3 api monitor prometheus db"
+        request_ssl_certificate "$domain" "$email" "$subdomains" || return 1
+    fi
+    
+    echo ""
+    
+    # Step 3: Setup auto-renewal
+    setup_ssl_auto_renewal || return 1
+    
+    echo ""
+    
+    # Step 4: Update Nginx (if function exists)
+    if type update_nginx_ssl_config &>/dev/null; then
+        update_nginx_ssl_config "$domain" || return 1
+    else
+        print_warning "Nginx SSL config update skipped"
+        print_info "Reload Nginx manually: docker compose exec nginx nginx -s reload"
+    fi
+    
+    print_success "SSL setup completed!"
+    return 0
+}
+
+renew_ssl_certificates() {
+    print_header "Renewing SSL Certificates"
+    
+    print_step "Running Certbot renewal..."
+    certbot renew
+    
+    if [ $? -eq 0 ]; then
+        print_success "Certificate renewal completed"
+        
+        # Reload Nginx
+        print_step "Reloading Nginx..."
+        if docker compose -f /opt/onestack/docker-compose.yml exec nginx nginx -s reload 2>/dev/null; then
+            print_success "Nginx reloaded"
+        fi
+        
+        return 0
+    else
+        print_error "Certificate renewal failed"
+        return 1
+    fi
+}
+
+check_ssl_status() {
+    print_header "SSL Certificate Status"
+    
+    local domain=$1
+    
+    if [ -z "$domain" ]; then
+        # Try to get from .env
+        if [ -f "/opt/onestack/.env" ]; then
+            domain=$(grep "^DOMAIN=" /opt/onestack/.env | cut -d= -f2)
+        fi
+    fi
+    
+    if [ -z "$domain" ]; then
+        print_error "Domain not specified"
+        return 1
+    fi
+    
+    print_info "Checking SSL for: $domain"
+    echo ""
+    
+    # Check if certificate exists
+    if [ -d "/etc/letsencrypt/live/$domain" ]; then
+        print_success "Certificate found"
+        
+        # Show certificate info
+        local cert_file="/etc/letsencrypt/live/$domain/cert.pem"
+        
+        if [ -f "$cert_file" ]; then
+            echo ""
+            print_info "Certificate Details:"
+            openssl x509 -in "$cert_file" -noout -text | grep -E "Subject:|Issuer:|Not Before:|Not After:" | sed 's/^/  /'
+            
+            # Check expiry
+            local expiry=$(openssl x509 -in "$cert_file" -noout -enddate | cut -d= -f2)
+            local expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null)
+            local now_epoch=$(date +%s)
+            local days_left=$(( ($expiry_epoch - $now_epoch) / 86400 ))
+            
+            echo ""
+            if [ $days_left -gt 30 ]; then
+                print_success "Certificate valid for $days_left days"
+            elif [ $days_left -gt 7 ]; then
+                print_warning "Certificate expires in $days_left days"
+            else
+                print_error "Certificate expires in $days_left days - RENEWAL REQUIRED!"
+            fi
+        fi
+    else
+        print_warning "No certificate found for $domain"
+    fi
+    
+    echo ""
+    
+    # List all certificates
+    print_info "All installed certificates:"
+    certbot certificates 2>/dev/null || echo "  (none)"
+}
+
+# Export functions
+export -f install_certbot
+export -f request_ssl_certificate
+export -f setup_ssl_auto_renewal
+export -f setup_ssl
+export -f renew_ssl_certificates
+export -f check_ssl_status
