@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack Management Console v2.0
+# OneStack Management Console v2.1
 # ═══════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -163,7 +163,7 @@ show_main_menu() {
     clear
     cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════════╗
-║              OneStack Management Console v2.0                 ║
+║           OneStack Management Console v2.1                    ║
 ╠═══════════════════════════════════════════════════════════════╣
 EOF
     
@@ -194,23 +194,28 @@ Management Tasks:
   12) Fix Parse Dashboard
   13) Reset service
   14) Clean up resources
+  15) 🔧 Quick Fix (auto-repair issues)
 
 📚 Information:
-  15) Show credentials
-  16) Show URLs
-  17) Check for updates
+  16) Show credentials
+  17) Show URLs
+  18) Check for updates
 
 🚪 Other:
-  18) Restart all services
-  19) Stop all services
-  20) Exit
+  19) Restart all services
+  20) Stop all services
+  21) Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
     
-    read -p "Enter choice [1-20]: " choice
+    read -p "Enter choice [1-21]: " choice
     handle_menu_choice "$choice"
 }
+
+# ═══════════════════════════════════════════════════
+# Menu Handler
+# ═══════════════════════════════════════════════════
 
 handle_menu_choice() {
     case $1 in
@@ -229,22 +234,23 @@ handle_menu_choice() {
         8)  run_task "health-check" ;;
         9)  run_task "system-status" ;;
         10) run_task "test-services" ;;
-        11) run_task "validate-install" ;;  # NEW!
+        11) run_task "validate-install" ;;
         
         # Troubleshooting
         12) run_task "fix-parse-dashboard" ;;
         13) run_task "service-reset" ;;
         14) run_task "cleanup" ;;
+        15) run_task "quick-fix" ;;  # NEW!
         
         # Information
-        15) show_credentials ;;
-        16) show_urls ;;
-        17) check_updates ;;
+        16) show_credentials ;;
+        17) show_urls ;;
+        18) check_updates ;;
         
         # Other
-        18) restart_all_services ;;
-        19) stop_all_services ;;
-        20) exit 0 ;;
+        19) restart_all_services ;;
+        20) stop_all_services ;;
+        21) exit 0 ;;
         
         *)  
             print_error "Invalid choice"
