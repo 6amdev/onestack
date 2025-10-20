@@ -1,4 +1,3 @@
-cat > /opt/onestack/tasks/fix-all.sh << 'EOF'
 #!/bin/bash
 # ═══════════════════════════════════════════════════
 # Fix Everything - Parse Dashboard + SSL + HTTPS
@@ -496,12 +495,3 @@ echo ""
 
 print_success "All done! Enjoy your OneStack! 🚀"
 echo ""
-EOF
-
-# Make executable
-chmod +x /opt/onestack/tasks/fix-all.sh
-
-# Run it
-echo "Script created! Running now..."
-echo ""
-sudo bash /opt/onestack/tasks/fix-all.sh
