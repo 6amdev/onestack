@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack - SSL Setup Task (Fixed)
+# OneStack - SSL Setup Task (Complete Fixed Version)
 # ═══════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -193,109 +193,56 @@ main() {
     # DNS Check
     print_step "Checking DNS configuration..."
     
-    # Get IPv4 address from DNS (A record) - multiple methods
-    local DNS_IP=""
+    # Get DNS IP - use simple dig first
+    local DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
     
-    # Method 1: dig
-    DNS_IP=$(dig +short A "$DOMAIN" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+    # Get Server IP - force IPv4
+    local SERVER_IP=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null)
     
-    # Method 2: host (fallback)
-    if [ -z "$DNS_IP" ]; then
-        DNS_IP=$(host -t A "$DOMAIN" 2>/dev/null | grep "has address" | awk '{print $4}' | head -1)
-    fi
-    
-    # Method 3: nslookup (fallback)
-    if [ -z "$DNS_IP" ]; then
-        DNS_IP=$(nslookup "$DOMAIN" 2>/dev/null | grep -A1 "Name:" | grep "Address:" | awk '{print $2}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-    fi
-    
-    # Get server's public IPv4 (force IPv4) - multiple methods
-    local SERVER_IP=""
-    
-    # Method 1: ifconfig.me
-    SERVER_IP=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null)
-    
-    # Method 2: icanhazip.com (fallback)
+    # Fallback for Server IP
     if [ -z "$SERVER_IP" ] || [[ "$SERVER_IP" == *":"* ]]; then
         SERVER_IP=$(curl -4 -s --max-time 5 icanhazip.com 2>/dev/null)
     fi
     
-    # Method 3: ipify.org (fallback)
     if [ -z "$SERVER_IP" ] || [[ "$SERVER_IP" == *":"* ]]; then
         SERVER_IP=$(curl -4 -s --max-time 5 api.ipify.org 2>/dev/null)
-    fi
-    
-    # Method 4: ipinfo.io (fallback)
-    if [ -z "$SERVER_IP" ] || [[ "$SERVER_IP" == *":"* ]]; then
-        SERVER_IP=$(curl -4 -s --max-time 5 ipinfo.io/ip 2>/dev/null)
-    fi
-    
-    # Method 5: Get from network interface (last resort)
-    if [ -z "$SERVER_IP" ] || [[ "$SERVER_IP" == *":"* ]]; then
-        # Try to get public IP from eth0 or similar
-        SERVER_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1)
-    fi
-    
-    # Filter out IPv6 if somehow still present
-    if [[ "$SERVER_IP" == *":"* ]]; then
-        print_warning "Got IPv6 address, trying to get IPv4..."
-        SERVER_IP=""
     fi
     
     # Display results
     echo "  Domain:    $DOMAIN"
     echo "  DNS IP:    ${DNS_IP:-(not resolved)}"
-    echo "  Server IP: ${SERVER_IP:-(not found)}"
+    echo "  Server IP: $SERVER_IP"
     echo ""
     
-    # Validation and user guidance
+    # Validation
     if [ -z "$DNS_IP" ]; then
-        print_warning "Could not resolve domain via DNS"
+        print_error "Could not resolve domain"
+        print_info "Check DNS configuration at your domain registrar"
         echo ""
-        print_info "Possible reasons:"
-        echo "  1. DNS not configured yet"
-        echo "  2. DNS propagation in progress (can take up to 48 hours)"
-        echo "  3. Server DNS resolver issue"
-        echo ""
-        
-        if [ -n "$SERVER_IP" ]; then
-            print_info "Configure DNS A record:"
-            echo "  Type: A"
-            echo "  Name: @"
-            echo "  Value: $SERVER_IP"
-            echo "  TTL: 3600"
-            echo ""
-            print_info "And wildcard:"
-            echo "  Type: A or CNAME"
-            echo "  Name: *"
-            echo "  Value: $SERVER_IP or $DOMAIN"
-        fi
-        
-        echo ""
-        print_warning "SSL certificate request will likely fail without DNS"
         read -p "Continue anyway? (y/N): " force
         [ "$force" != "y" ] && exit 1
         
     elif [ -z "$SERVER_IP" ]; then
-        print_error "Could not determine server IPv4 address"
-        print_info "Please check network configuration"
+        print_warning "Could not determine server IP"
         echo ""
         read -p "Continue anyway? (y/N): " force
         [ "$force" != "y" ] && exit 1
         
     elif [ "$DNS_IP" != "$SERVER_IP" ]; then
-        print_error "DNS mismatch!"
+        print_warning "DNS mismatch detected"
         echo "  DNS points to: $DNS_IP"
         echo "  Server IP is:  $SERVER_IP"
         echo ""
-        print_info "Please update DNS A record to: $SERVER_IP"
-        print_warning "Or wait for DNS propagation to complete"
+        print_info "This may be due to:"
+        echo "  • DNS propagation in progress"
+        echo "  • Wrong A record value"
+        echo "  • Using proxy/CDN (e.g., Cloudflare)"
         echo ""
         read -p "Continue anyway? (y/N): " force
         [ "$force" != "y" ] && exit 1
         
     else
-        print_success "DNS is correctly configured! ✅"
+        print_success "DNS correctly configured! ✅"
     fi
     
     # Mode confirmation
@@ -385,7 +332,9 @@ main() {
             echo "  https://www.ssllabs.com/ssltest/analyze.html?d=$DOMAIN"
         else
             print_warning "STAGING MODE - Certificates are not trusted by browsers"
-            print_info "To get real certificates, change ssl_mode to 'production'"
+            print_info "To get real certificates:"
+            echo "  1. Edit config.yml → ssl_mode: production"
+            echo "  2. Run SSL setup again"
         fi
         
         echo ""
@@ -418,3 +367,19 @@ main() {
 # Run
 check_root
 main
+```
+
+---
+
+## 🎯 **คำตอบ: เพิ่ม n8n.sixamdev.com ยังไง?**
+
+---
+
+## 📝 **วิธีเพิ่ม Subdomain ใหม่ (n8n):**
+
+### **Step 1: DNS (ไม่ต้องทำ - มี wildcard แล้ว)**
+```
+✅ DNS: ไม่ต้องเพิ่ม!
+   CNAME * → sixamdev.com (มีอยู่แล้ว)
+   
+   n8n.sixamdev.com จะชี้มา server อัตโนมัติ!
