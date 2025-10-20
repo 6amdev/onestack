@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack Management Console v2.1
+# OneStack Management Console v2.2
 # ═══════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +43,6 @@ check_prerequisites() {
         print_warning "Please upload task scripts"
         missing=1
     else
-        # Count task scripts
         local task_count=$(find "$SCRIPT_DIR/tasks" -name "*.sh" -type f 2>/dev/null | wc -l)
         if [ "$task_count" -eq 0 ]; then
             print_warning "No task scripts found (0 tasks)"
@@ -52,13 +51,12 @@ check_prerequisites() {
         fi
     fi
     
-    # Check lib/06-ssl.sh for SSL features
+    # Check lib/06-ssl.sh
     if [ ! -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
         print_warning "lib/06-ssl.sh not found (SSL features unavailable)"
         missing=1
     fi
     
-    # Continue anyway if user wants
     if [ "$missing" -eq 1 ]; then
         echo ""
         read -p "Continue anyway? (Y/n): " cont
@@ -67,7 +65,7 @@ check_prerequisites() {
 }
 
 # ═══════════════════════════════════════════════════
-# Check if OneStack is installed
+# Check Installation
 # ═══════════════════════════════════════════════════
 
 check_installation() {
@@ -84,7 +82,7 @@ check_installation() {
 }
 
 # ═══════════════════════════════════════════════════
-# Task Runner with Error Handling
+# Task Runner
 # ═══════════════════════════════════════════════════
 
 run_task() {
@@ -94,16 +92,13 @@ run_task() {
     clear
     
     if [ -f "$task_file" ]; then
-        # Check if executable
         if [ ! -x "$task_file" ]; then
             chmod +x "$task_file"
         fi
         
-        # Run task
         bash "$task_file"
         local exit_code=$?
         
-        # Handle exit code
         if [ $exit_code -ne 0 ]; then
             echo ""
             print_error "Task exited with error code: $exit_code"
@@ -134,13 +129,12 @@ run_task() {
         
         echo ""
         print_info "Upload location: $SCRIPT_DIR/tasks/"
-        
         return 1
     fi
 }
 
 # ═══════════════════════════════════════════════════
-# Show Service Status
+# Service Status
 # ═══════════════════════════════════════════════════
 
 show_service_status() {
@@ -163,7 +157,7 @@ show_main_menu() {
     clear
     cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════════╗
-║           OneStack Management Console v2.1                    ║
+║           OneStack Management Console v2.2                    ║
 ╠═══════════════════════════════════════════════════════════════╣
 EOF
     
@@ -195,21 +189,22 @@ Management Tasks:
   13) Reset service
   14) Clean up resources
   15) 🔧 Quick Fix (auto-repair issues)
+  16) 📝 Fix .env configuration
 
 📚 Information:
-  16) Show credentials
-  17) Show URLs
-  18) Check for updates
+  17) Show credentials
+  18) Show URLs
+  19) Check for updates
 
 🚪 Other:
-  19) Restart all services
-  20) Stop all services
-  21) Exit
+  20) Restart all services
+  21) Stop all services
+  22) Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
     
-    read -p "Enter choice [1-21]: " choice
+    read -p "Enter choice [1-22]: " choice
     handle_menu_choice "$choice"
 }
 
@@ -240,17 +235,18 @@ handle_menu_choice() {
         12) run_task "fix-parse-dashboard" ;;
         13) run_task "service-reset" ;;
         14) run_task "cleanup" ;;
-        15) run_task "quick-fix" ;;  # NEW!
+        15) run_task "quick-fix" ;;
+        16) run_task "fix-env" ;;
         
         # Information
-        16) show_credentials ;;
-        17) show_urls ;;
-        18) check_updates ;;
+        17) show_credentials ;;
+        18) show_urls ;;
+        19) check_updates ;;
         
         # Other
-        19) restart_all_services ;;
-        20) stop_all_services ;;
-        21) exit 0 ;;
+        20) restart_all_services ;;
+        21) stop_all_services ;;
+        22) exit 0 ;;
         
         *)  
             print_error "Invalid choice"
@@ -264,7 +260,7 @@ handle_menu_choice() {
 }
 
 # ═══════════════════════════════════════════════════
-# Quick Actions (Built-in)
+# Built-in Functions
 # ═══════════════════════════════════════════════════
 
 show_credentials() {
@@ -289,11 +285,10 @@ show_urls() {
     local DOMAIN=$(grep "^DOMAIN=" /opt/onestack/.env 2>/dev/null | cut -d= -f2)
     
     if [ -z "$DOMAIN" ]; then
-        DOMAIN="sixamdev.com"
+        DOMAIN="localhost"
         print_warning "Domain not found in .env, using default"
     fi
     
-    # Check if SSL is configured
     if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
         local PROTOCOL="https"
         print_success "SSL is configured ✅"
@@ -315,7 +310,6 @@ show_urls() {
     echo "  Adminer:         $PROTOCOL://db.$DOMAIN"
     echo ""
     
-    # Test URLs
     print_info "Testing accessibility..."
     for url in "$PROTOCOL://$DOMAIN" "$PROTOCOL://api.$DOMAIN/parse/health"; do
         local status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>&1)
@@ -334,7 +328,6 @@ check_updates() {
     print_info "Current OneStack version: 1.0.0"
     print_info "Checking for updates..."
     
-    # This would check GitHub releases or similar
     print_warning "Update check not implemented yet"
     print_info "Check manually: https://github.com/yourusername/onestack"
 }
