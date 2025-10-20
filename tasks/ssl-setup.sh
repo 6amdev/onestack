@@ -190,27 +190,51 @@ main() {
         fi
     fi
     
-    # DNS Check
+   # DNS Check
     print_step "Checking DNS configuration..."
     
-    local DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | tail -1)
-    local SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null)
+    # Get IPv4 address from DNS (A record)
+    local DNS_IP=$(dig +short A "$DOMAIN" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
     
-    if [ -z "$DNS_IP" ]; then
-        print_warning "Could not resolve domain"
+    # Get server's public IPv4 (force IPv4)
+    local SERVER_IP=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null)
+    
+    # Fallback methods if above failed
+    if [ -z "$SERVER_IP" ]; then
+        SERVER_IP=$(curl -4 -s --max-time 5 icanhazip.com 2>/dev/null)
     fi
     
     if [ -z "$SERVER_IP" ]; then
-        print_warning "Could not determine server IP"
-        SERVER_IP="(unknown)"
+        SERVER_IP=$(curl -4 -s --max-time 5 api.ipify.org 2>/dev/null)
     fi
     
+    # If still no IP, try getting from hostname
+    if [ -z "$SERVER_IP" ]; then
+        SERVER_IP=$(hostname -I | awk '{print $1}')
+    fi
+    
+    # Display results
     echo "  Domain:    $DOMAIN"
     echo "  DNS IP:    ${DNS_IP:-(not resolved)}"
     echo "  Server IP: $SERVER_IP"
     echo ""
     
-    if [ -n "$DNS_IP" ] && [ -n "$SERVER_IP" ] && [ "$DNS_IP" != "$SERVER_IP" ]; then
+    # Validation and user guidance
+    if [ -z "$DNS_IP" ]; then
+        print_warning "Could not resolve domain via DNS"
+        print_info "DNS might not be configured yet"
+        print_info "Configure DNS A record:"
+        print_info "  A    @    $SERVER_IP"
+        print_info "  A    *    $SERVER_IP (wildcard for subdomains)"
+        echo ""
+        read -p "Continue anyway? (y/N): " force
+        [ "$force" != "y" ] && exit 1
+    elif [ -z "$SERVER_IP" ]; then
+        print_warning "Could not determine server IP"
+        echo ""
+        read -p "Continue anyway? (y/N): " force
+        [ "$force" != "y" ] && exit 1
+    elif [ "$DNS_IP" != "$SERVER_IP" ]; then
         print_error "DNS is not pointing to this server!"
         print_info "Please configure DNS first:"
         print_info "  A    @    $SERVER_IP"
@@ -218,12 +242,8 @@ main() {
         echo ""
         read -p "Continue anyway? (y/N): " force
         [ "$force" != "y" ] && exit 1
-    elif [ -n "$DNS_IP" ] && [ "$DNS_IP" = "$SERVER_IP" ]; then
-        print_success "DNS is correctly configured"
     else
-        print_warning "Could not verify DNS configuration"
-        read -p "Continue anyway? (y/N): " force
-        [ "$force" != "y" ] && exit 1
+        print_success "DNS is correctly configured"
     fi
     
     # Mode confirmation
