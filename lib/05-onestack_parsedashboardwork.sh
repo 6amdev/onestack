@@ -1,5 +1,5 @@
 #!/bin/bash
-# OneStack - Service Deployment (Parse Server Fixed)
+# OneStack - Service Deployment (FINAL FIX)
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$LIB_DIR/utils.sh"
@@ -11,10 +11,15 @@ source "$LIB_DIR/utils.sh"
 check_nginx_conflict() {
     print_header "Checking for Port Conflicts"
     
+    # Check if port 80 is in use
     if ss -tulpn | grep -q ":80 "; then
         print_warning "Port 80 is already in use!"
         echo ""
+        echo "Services using port 80:"
+        ss -tulpn | grep ":80 " || true
+        echo ""
         
+        # Check if it's system nginx
         if systemctl is-active --quiet nginx 2>/dev/null; then
             print_warning "System Nginx is running"
             echo ""
@@ -26,14 +31,29 @@ check_nginx_conflict() {
                 print_success "System Nginx stopped and disabled"
             else
                 print_error "Cannot proceed with port 80 in use"
+                echo ""
+                print_info "Options:"
+                echo "  1. Stop nginx: sudo systemctl stop nginx"
+                echo "  2. Use different ports for OneStack"
                 exit 1
             fi
         else
             print_error "Port 80 is in use by another service"
+            echo ""
+            print_info "Free port 80 first, then run installer again"
             exit 1
         fi
     else
         print_success "Port 80 is available"
+    fi
+    
+    # Check port 443
+    if ss -tulpn | grep -q ":443 "; then
+        print_warning "Port 443 is already in use"
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            systemctl stop nginx
+            print_success "Stopped system Nginx"
+        fi
     fi
     
     echo ""
@@ -48,17 +68,28 @@ create_directory_structure() {
     
     local base_dir="$INSTALL_DIR"
     
-    print_step "Creating directories..."
+    print_step "Creating directories in: $base_dir"
     
     local dirs=(
-        "nginx/conf.d" "nginx/ssl" "nginx/logs"
-        "databases/postgres/init" "databases/mongodb/init" "databases/redis"
-        "frontends/main" "frontends/app" "frontends/admin"
+        "nginx/conf.d"
+        "nginx/ssl"
+        "nginx/logs"
+        "databases/postgres/init"
+        "databases/mongodb/init"
+        "databases/redis"
+        "frontends/main"
+        "frontends/app"
+        "frontends/admin"
         "backends/parse-server/cloud"
-        "backends/nodejs-api" "backends/python-rag"
-        "monitoring/prometheus" "monitoring/grafana/provisioning/datasources"
+        "backends/nodejs-api"
+        "backends/python-rag"
+        "monitoring/prometheus"
+        "monitoring/grafana/provisioning/datasources"
         "monitoring/grafana/provisioning/dashboards"
-        "backups" "logs" "config" "scripts"
+        "backups"
+        "logs"
+        "config"
+        "scripts"
         "parse-dashboard"
     )
     
@@ -73,7 +104,7 @@ create_directory_structure() {
 }
 
 # ════════════════════════════════════════════════
-# PASSWORD GENERATION (FIXED - Generate Parse credentials first)
+# PASSWORD GENERATION
 # ════════════════════════════════════════════════
 
 generate_passwords() {
@@ -81,26 +112,20 @@ generate_passwords() {
     
     print_step "Creating secure credentials..."
     
-    # Database passwords
     export POSTGRES_PASSWORD=$(generate_password 32)
     export MONGODB_PASSWORD=$(generate_password 32)
     export REDIS_PASSWORD=$(generate_password 32)
     export MINIO_ROOT_PASSWORD=$(generate_password 32)
     export GRAFANA_PASSWORD=$(generate_password 24)
     
-    # Parse credentials - MUST be generated here
     if [ "$INSTALL_PARSE" = "true" ]; then
-        export PARSE_APP_ID=$(openssl rand -hex 16)
-        export PARSE_MASTER_KEY=$(openssl rand -hex 32)
-        export PARSE_CLIENT_KEY=$(openssl rand -hex 16)
+        export PARSE_APP_ID=$(generate_password 16)
+        export PARSE_MASTER_KEY=$(generate_password 48)
+        export PARSE_CLIENT_KEY=$(generate_password 32)
         export PARSE_DASHBOARD_PASSWORD=$(generate_password 24)
-        
-        print_success "Parse credentials generated:"
-        print_info "  App ID: $PARSE_APP_ID"
-        print_info "  Master Key: ${PARSE_MASTER_KEY:0:20}..."
     fi
     
-    print_success "All passwords generated"
+    print_success "Passwords generated"
     save_credentials
     
     echo ""
@@ -132,6 +157,7 @@ Redis:
 
 MinIO:
   Console: http://storage.$PRIMARY_DOMAIN
+  S3 API: http://s3.$PRIMARY_DOMAIN
   User: minioadmin
   Password: $MINIO_ROOT_PASSWORD
 
@@ -144,25 +170,22 @@ Grafana:
   User: admin
   Password: $GRAFANA_PASSWORD
 
+Prometheus:
+  URL: http://prometheus.$PRIMARY_DOMAIN
+
 EOF
     fi
 
     if [ "$INSTALL_PARSE" = "true" ]; then
         cat >> "$cred_file" << EOF
 Parse Server:
-  API URL: http://api.$PRIMARY_DOMAIN/parse
+  API: http://api.$PRIMARY_DOMAIN/parse
   Dashboard: http://api.$PRIMARY_DOMAIN
-  
-  Dashboard Login:
-    Username: admin
-    Password: $PARSE_DASHBOARD_PASSWORD
-  
-  API Credentials:
-    App ID: $PARSE_APP_ID
-    Master Key: $PARSE_MASTER_KEY
-    Client Key: $PARSE_CLIENT_KEY
-  
-  Database: postgres://postgres:***@postgres:5432/parse_db
+  Dashboard User: admin
+  Dashboard Password: $PARSE_DASHBOARD_PASSWORD
+  App ID: $PARSE_APP_ID
+  Master Key: $PARSE_MASTER_KEY
+  Client Key: $PARSE_CLIENT_KEY
 
 EOF
     fi
@@ -177,7 +200,7 @@ EOF
 
     cat >> "$cred_file" << 'EOF'
 ═══════════════════════════════════════════════════
-IMPORTANT: Keep this file secure!
+Keep this file secure!
 ═══════════════════════════════════════════════════
 EOF
     
@@ -186,7 +209,7 @@ EOF
 }
 
 # ════════════════════════════════════════════════
-# .ENV FILE (FIXED - All Parse variables)
+# .ENV FILE (FIXED - Use PRIMARY_DOMAIN correctly)
 # ════════════════════════════════════════════════
 
 create_env_file() {
@@ -205,7 +228,7 @@ COMPOSE_PROJECT_NAME=onestack
 TIMEZONE=${CONFIG_system_timezone:-Asia/Bangkok}
 NODE_ENV=production
 
-# DOMAIN
+# DOMAIN (used by all services)
 PRIMARY_DOMAIN=$PRIMARY_DOMAIN
 DOMAIN=$PRIMARY_DOMAIN
 SSL_EMAIL=$SSL_EMAIL
@@ -234,29 +257,20 @@ MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD
 EOF
 
     if [ "$INSTALL_PARSE" = "true" ]; then
-        # CRITICAL: All Parse variables must be set here
         cat >> "$env_file" << EOF
-# PARSE SERVER - All credentials
+# PARSE SERVER
 PARSE_SERVER_VERSION=latest
 PARSE_APP_ID=$PARSE_APP_ID
 PARSE_MASTER_KEY=$PARSE_MASTER_KEY
 PARSE_CLIENT_KEY=$PARSE_CLIENT_KEY
-PARSE_SERVER_APPLICATION_ID=$PARSE_APP_ID
-PARSE_SERVER_MASTER_KEY=$PARSE_MASTER_KEY
-
-# Parse Database
 PARSE_DATABASE_URI=postgres://postgres:$POSTGRES_PASSWORD@postgres:5432/parse_db
-
-# Parse Server URLs
 PARSE_SERVER_URL=http://parse-server:1337/parse
 PARSE_PUBLIC_SERVER_URL=http://api.$PRIMARY_DOMAIN/parse
-PARSE_SERVER_MOUNT_PATH=/parse
 
-# Parse Dashboard
+# PARSE DASHBOARD
 PARSE_DASHBOARD_USER=admin
 PARSE_DASHBOARD_PASSWORD=$PARSE_DASHBOARD_PASSWORD
 PARSE_DASHBOARD_APP_NAME=OneStack
-PARSE_DASHBOARD_ALLOW_INSECURE_HTTP=true
 
 EOF
     fi
@@ -288,12 +302,12 @@ EOF
     chmod 600 "$env_file"
     chown "$ONESTACK_USER:$ONESTACK_USER" "$env_file"
     
-    print_success ".env file created"
+    print_success ".env file created with domain: $PRIMARY_DOMAIN"
     echo ""
 }
 
 # ════════════════════════════════════════════════
-# DOCKER COMPOSE (FIXED - Parse Server environment)
+# DOCKER COMPOSE
 # ════════════════════════════════════════════════
 
 create_docker_compose() {
@@ -399,6 +413,8 @@ services:
     image: nginx:alpine
     container_name: onestack-nginx
     restart: unless-stopped
+    environment:
+      DOMAIN: ${PRIMARY_DOMAIN}
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
@@ -420,15 +436,11 @@ DCEOF
     container_name: onestack-parse-server
     restart: unless-stopped
     environment:
-      # CRITICAL: Use correct environment variable names
       PARSE_SERVER_APPLICATION_ID: ${PARSE_APP_ID}
       PARSE_SERVER_MASTER_KEY: ${PARSE_MASTER_KEY}
       PARSE_SERVER_DATABASE_URI: ${PARSE_DATABASE_URI}
       PARSE_SERVER_URL: ${PARSE_SERVER_URL}
       PARSE_PUBLIC_SERVER_URL: ${PARSE_PUBLIC_SERVER_URL}
-      PARSE_SERVER_MOUNT_PATH: ${PARSE_SERVER_MOUNT_PATH}
-      PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: "false"
-      PARSE_SERVER_ENABLE_ANON_USERS: "false"
       TZ: ${TIMEZONE}
     volumes:
       - ./backends/parse-server/cloud:/parse-server/cloud
@@ -440,11 +452,10 @@ DCEOF
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1337${PARSE_SERVER_MOUNT_PATH}/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1337/parse/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
 
   parse-dashboard:
     image: parseplatform/parse-dashboard:5.2.0
@@ -534,20 +545,14 @@ create_database_init_scripts() {
 #!/bin/bash
 set -e
 
-echo "=== Creating PostgreSQL databases ==="
-
 if [ -n "$POSTGRES_MULTIPLE_DATABASES" ]; then
     for db in $(echo $POSTGRES_MULTIPLE_DATABASES | tr ',' ' '); do
         echo "Creating database: $db"
         psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
-            SELECT 'CREATE DATABASE $db'
-            WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$db')\gexec
+            CREATE DATABASE $db;
 EOSQL
-        echo "✓ Database $db ready"
     done
 fi
-
-echo "=== PostgreSQL initialization complete ==="
 PGINIT
 
     chmod +x "$INSTALL_DIR/databases/postgres/init/01-create-databases.sh"
@@ -557,7 +562,7 @@ PGINIT
 }
 
 # ════════════════════════════════════════════════
-# PARSE DASHBOARD CONFIG (FIXED - Must match .env exactly)
+# PARSE DASHBOARD CONFIG (FIXED - Use env vars)
 # ════════════════════════════════════════════════
 
 create_parse_dashboard_config() {
@@ -568,10 +573,9 @@ create_parse_dashboard_config() {
     print_header "Creating Parse Dashboard Config"
     
     print_step "Generating Parse Dashboard configuration..."
-    print_info "App ID: $PARSE_APP_ID"
-    print_info "Master Key: ${PARSE_MASTER_KEY:0:20}..."
+    print_info "Using domain: $PRIMARY_DOMAIN"
     
-    # CRITICAL: Must use same credentials as Parse Server
+    # Use variables from environment
     cat > "$INSTALL_DIR/parse-dashboard/config.json" << EOF
 {
   "apps": [
@@ -580,8 +584,7 @@ create_parse_dashboard_config() {
       "appId": "$PARSE_APP_ID",
       "masterKey": "$PARSE_MASTER_KEY",
       "appName": "OneStack",
-      "production": false,
-      "iconName": "onestack.png"
+      "production": false
     }
   ],
   "users": [
@@ -591,43 +594,27 @@ create_parse_dashboard_config() {
     }
   ],
   "useEncryptedPasswords": false,
-  "trustProxy": 1,
-  "allowInsecureHTTP": true
+  "trustProxy": 1
 }
 EOF
     
     chmod 644 "$INSTALL_DIR/parse-dashboard/config.json"
     chown "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR/parse-dashboard/config.json"
     
-    # Cloud code example
+    # Cloud code
     cat > "$INSTALL_DIR/backends/parse-server/cloud/main.js" << 'CLOUDCODE'
 // Parse Cloud Code
-// Define your cloud functions here
-
 Parse.Cloud.define('hello', async (request) => {
-  return { message: 'Hello from OneStack Parse Server!' };
-});
-
-Parse.Cloud.define('version', async (request) => {
-  return { version: '2.0.0', platform: 'OneStack' };
-});
-
-// Example: beforeSave trigger
-Parse.Cloud.beforeSave('TestObject', (request) => {
-  const object = request.object;
-  if (!object.get('name')) {
-    throw new Error('Name is required');
-  }
+  return 'Hello from OneStack!';
 });
 CLOUDCODE
     
     print_success "Parse Dashboard config created"
-    print_info "Config saved to: parse-dashboard/config.json"
     echo ""
 }
 
 # ════════════════════════════════════════════════
-# NGINX CONFIG
+# NGINX CONFIG (FIXED - Use env variable)
 # ════════════════════════════════════════════════
 
 create_nginx_config() {
@@ -665,102 +652,143 @@ http {
 }
 NGXMAIN
 
+    # Use actual domain value, not variable
     cat > "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
 # OneStack Nginx Configuration
 # Domain: $PRIMARY_DOMAIN
 
+# Main Site
 server {
     listen 80;
     server_name $PRIMARY_DOMAIN www.$PRIMARY_DOMAIN;
+    
     root /var/www/main;
     index index.html;
+    
     location / {
         try_files \$uri \$uri/ /index.html;
     }
 }
 
+# MinIO Console
 server {
     listen 80;
-    server_name storage.$PRIMARY_DOMAIN;
+    server_name storage.$PRIMARY_DOMAIN minio.$PRIMARY_DOMAIN;
+    
     location / {
         proxy_pass http://minio:9001;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        
+        # WebSocket support
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
     }
 }
 
+# MinIO S3 API
 server {
     listen 80;
-    server_name s3.$PRIMARY_DOMAIN;
+    server_name s3.$PRIMARY_DOMAIN cdn.$PRIMARY_DOMAIN;
+    
     client_max_body_size 0;
+    
     location / {
         proxy_pass http://minio:9000;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
 }
+
 EOF
 
     if [ "$INSTALL_PARSE" = "true" ]; then
         cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
 
+# Parse Server & Dashboard
 server {
     listen 80;
-    server_name api.$PRIMARY_DOMAIN;
+    server_name api.$PRIMARY_DOMAIN parse.$PRIMARY_DOMAIN;
     
+    # Parse Server API
     location /parse {
         proxy_pass http://parse-server:1337;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 300s;
-        proxy_connect_timeout 300s;
     }
     
+    # Parse Dashboard
     location / {
         proxy_pass http://parse-dashboard:4040;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
 }
+
 EOF
     fi
 
     if [ "$INSTALL_MONITORING" = "true" ]; then
         cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
 
+# Grafana
 server {
     listen 80;
-    server_name monitor.$PRIMARY_DOMAIN;
+    server_name monitor.$PRIMARY_DOMAIN grafana.$PRIMARY_DOMAIN;
+    
     location / {
         proxy_pass http://grafana:3000;
         proxy_set_header Host \$host;
     }
 }
+
+# Prometheus
+server {
+    listen 80;
+    server_name prometheus.$PRIMARY_DOMAIN metrics.$PRIMARY_DOMAIN;
+    
+    location / {
+        proxy_pass http://prometheus:9090;
+        proxy_set_header Host \$host;
+    }
+}
+
 EOF
     fi
 
     if [ "$INSTALL_ADMINER" = "true" ]; then
         cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
 
+# Adminer
 server {
     listen 80;
-    server_name db.$PRIMARY_DOMAIN;
+    server_name db.$PRIMARY_DOMAIN adminer.$PRIMARY_DOMAIN;
+    
     location / {
         proxy_pass http://adminer:8080;
         proxy_set_header Host \$host;
     }
 }
+
 EOF
     fi
 
     cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << 'DEFNX'
 
+# Default server (health check)
 server {
     listen 80 default_server;
+    server_name _;
+    
     location /health {
+        access_log off;
         return 200 "healthy\n";
+        add_header Content-Type text/plain;
     }
+    
     location / {
         return 404;
     }
@@ -768,7 +796,7 @@ server {
 DEFNX
 
     chown -R "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR/nginx"
-    print_success "Nginx configured"
+    print_success "Nginx configured for domain: $PRIMARY_DOMAIN"
     echo ""
 }
 
@@ -786,10 +814,15 @@ create_monitoring_config() {
     cat > "$INSTALL_DIR/monitoring/prometheus/prometheus.yml" << 'PROM'
 global:
   scrape_interval: 15s
+
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+      
+  - job_name: 'node'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
 PROM
 
     cat > "$INSTALL_DIR/monitoring/grafana/provisioning/datasources/prometheus.yml" << 'GRAF'
@@ -800,6 +833,7 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    editable: true
 GRAF
 
     print_success "Monitoring configured"
@@ -836,56 +870,103 @@ create_default_frontend() {
             border-radius: 20px;
             padding: 60px 40px;
             max-width: 900px;
+            width: 100%;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             text-align: center;
         }
         .logo { font-size: 5em; margin-bottom: 20px; }
-        h1 { font-size: 3.5em; color: #333; }
-        .status { background: #10b981; color: white; padding: 12px 30px; border-radius: 50px; margin: 20px 0; display: inline-block; }
-        .domain { background: #f3f4f6; padding: 15px; border-radius: 10px; margin: 20px 0; font-family: monospace; color: #667eea; }
-        .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 30px; }
-        a { background: #f3f4f6; padding: 25px; border-radius: 10px; text-decoration: none; color: #333; transition: 0.3s; }
-        a:hover { transform: translateY(-5px); background: white; box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
-        .service-icon { font-size: 2em; }
-        .service-name { font-weight: bold; color: #667eea; margin: 10px 0; }
+        h1 { font-size: 3.5em; color: #333; margin-bottom: 10px; }
+        .version { color: #999; font-size: 1em; margin-bottom: 20px; }
+        .status {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 50px;
+            font-weight: bold;
+            margin-bottom: 30px;
+        }
+        .domain {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            font-family: monospace;
+            color: #667eea;
+            font-weight: bold;
+        }
+        .links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 30px;
+        }
+        a {
+            background: #f3f4f6;
+            padding: 25px 15px;
+            border-radius: 10px;
+            text-decoration: none;
+            color: #333;
+            transition: 0.3s;
+            display: block;
+        }
+        a:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            background: white;
+        }
+        .service-icon { font-size: 2em; margin-bottom: 10px; }
+        .service-name { font-weight: bold; color: #667eea; margin-bottom: 5px; }
+        .service-url { font-size: 0.85em; color: #999; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="logo">🚀</div>
         <h1>OneStack</h1>
-        <div class="status">✓ Running</div>
+        <div class="version">v2.0 Production</div>
+        <div class="status">✓ System Running</div>
+        
         <div class="domain">$PRIMARY_DOMAIN</div>
         
         <div class="links">
             <a href="http://storage.$PRIMARY_DOMAIN">
                 <div class="service-icon">📦</div>
-                <div class="service-name">MinIO</div>
+                <div class="service-name">MinIO Console</div>
+                <div class="service-url">storage.$PRIMARY_DOMAIN</div>
             </a>
+            
             <a href="http://s3.$PRIMARY_DOMAIN">
                 <div class="service-icon">☁️</div>
                 <div class="service-name">S3 API</div>
+                <div class="service-url">s3.$PRIMARY_DOMAIN</div>
             </a>
 EOF
 
     [ "$INSTALL_PARSE" = "true" ] && cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
+            
             <a href="http://api.$PRIMARY_DOMAIN">
                 <div class="service-icon">⚡</div>
-                <div class="service-name">Parse</div>
+                <div class="service-name">Parse Dashboard</div>
+                <div class="service-url">api.$PRIMARY_DOMAIN</div>
             </a>
 EOF
 
     [ "$INSTALL_MONITORING" = "true" ] && cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
+            
             <a href="http://monitor.$PRIMARY_DOMAIN">
                 <div class="service-icon">📊</div>
                 <div class="service-name">Grafana</div>
+                <div class="service-url">monitor.$PRIMARY_DOMAIN</div>
             </a>
 EOF
 
     [ "$INSTALL_ADMINER" = "true" ] && cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
+            
             <a href="http://db.$PRIMARY_DOMAIN">
                 <div class="service-icon">🗄️</div>
                 <div class="service-name">Adminer</div>
+                <div class="service-url">db.$PRIMARY_DOMAIN</div>
             </a>
 EOF
 
@@ -911,13 +992,22 @@ deploy_services() {
     cd "$INSTALL_DIR"
     
     print_step "Pulling Docker images..."
-    docker compose pull 2>&1 | tee -a "${LOG_FILE:-/var/log/onestack-install.log}" || true
-    print_success "Images pulled"
+    
+    if docker compose pull 2>&1 | tee -a "${LOG_FILE:-/var/log/onestack-install.log}"; then
+        print_success "Images pulled"
+    else
+        print_warning "Some images may have failed"
+    fi
     
     echo ""
     print_step "Starting services..."
-    docker compose up -d 2>&1 | tee -a "${LOG_FILE:-/var/log/onestack-install.log}"
-    print_success "Services started"
+    
+    if docker compose up -d 2>&1 | tee -a "${LOG_FILE:-/var/log/onestack-install.log}"; then
+        print_success "Services started"
+    else
+        print_error "Failed to start services"
+        return 1
+    fi
     
     print_step "Setting permissions..."
     chown -R "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR" 2>/dev/null || true
@@ -932,8 +1022,8 @@ deploy_services() {
 wait_for_services() {
     print_header "Waiting for Services"
     
-    print_info "Waiting 40 seconds for services to initialize..."
-    sleep 40
+    print_info "Waiting 30 seconds for services to initialize..."
+    sleep 30
     
     cd "$INSTALL_DIR"
     
@@ -948,31 +1038,19 @@ wait_for_services() {
         if docker compose ps "$service" 2>/dev/null | grep -q "Up"; then
             print_success "$service: ✓ Running"
         else
-            print_warning "$service: ⚠ Check logs"
+            print_warning "$service: ⚠ Check status"
         fi
     done
-    
-    # Special check for Parse Server
-    if [ "$INSTALL_PARSE" = "true" ]; then
-        echo ""
-        print_step "Testing Parse Server API..."
-        sleep 5
-        
-        if curl -s http://localhost:1337/parse/health 2>/dev/null | grep -q "ok"; then
-            print_success "Parse Server API: ✓ Responding"
-        else
-            print_warning "Parse Server API: ⚠ Not responding yet"
-            print_info "Check logs: docker compose logs parse-server"
-        fi
-    fi
     
     echo ""
 }
 
 verify_services() {
     print_header "Service Status"
+    
     cd "$INSTALL_DIR"
     docker compose ps
+    
     echo ""
 }
 
@@ -990,33 +1068,38 @@ display_access_info() {
     echo "  Access URLs"
     echo "═══════════════════════════════════════════════════"
     echo ""
-    echo "Main: http://$PRIMARY_DOMAIN"
-    echo "MinIO: http://storage.$PRIMARY_DOMAIN"
+    echo "Main Site:"
+    echo "  http://$PRIMARY_DOMAIN"
+    echo ""
+    echo "Services:"
+    echo "  MinIO Console:  http://storage.$PRIMARY_DOMAIN"
+    echo "  S3 API:         http://s3.$PRIMARY_DOMAIN"
     
-    [ "$INSTALL_PARSE" = "true" ] && echo "Parse Dashboard: http://api.$PRIMARY_DOMAIN"
-    [ "$INSTALL_PARSE" = "true" ] && echo "Parse API: http://api.$PRIMARY_DOMAIN/parse"
-    [ "$INSTALL_MONITORING" = "true" ] && echo "Grafana: http://monitor.$PRIMARY_DOMAIN"
-    [ "$INSTALL_ADMINER" = "true" ] && echo "Adminer: http://db.$PRIMARY_DOMAIN"
+    [ "$INSTALL_PARSE" = "true" ] && echo "  Parse Dashboard: http://api.$PRIMARY_DOMAIN"
+    [ "$INSTALL_PARSE" = "true" ] && echo "  Parse API:       http://api.$PRIMARY_DOMAIN/parse"
+    [ "$INSTALL_MONITORING" = "true" ] && echo "  Grafana:        http://monitor.$PRIMARY_DOMAIN"
+    [ "$INSTALL_ADMINER" = "true" ] && echo "  Adminer:        http://db.$PRIMARY_DOMAIN"
     
     echo ""
     echo "═══════════════════════════════════════════════════"
-    echo "  Credentials"
+    echo "  DNS Setup Required"
     echo "═══════════════════════════════════════════════════"
     echo ""
-    echo "Saved to: $INSTALL_DIR/.credentials"
+    echo "Add these DNS A records:"
+    echo "  $PRIMARY_DOMAIN           → $server_ip"
+    echo "  storage.$PRIMARY_DOMAIN   → $server_ip"
+    echo "  s3.$PRIMARY_DOMAIN        → $server_ip"
+    echo "  api.$PRIMARY_DOMAIN       → $server_ip"
+    echo "  monitor.$PRIMARY_DOMAIN   → $server_ip"
+    echo "  db.$PRIMARY_DOMAIN        → $server_ip"
     echo ""
-    echo "View credentials:"
-    echo "  cat $INSTALL_DIR/.credentials"
+    echo "Or add to /etc/hosts:"
+    echo "  $server_ip  $PRIMARY_DOMAIN storage.$PRIMARY_DOMAIN s3.$PRIMARY_DOMAIN api.$PRIMARY_DOMAIN"
     echo ""
-    
-    if [ "$INSTALL_PARSE" = "true" ]; then
-        echo "Parse Dashboard Login:"
-        echo "  Username: admin"
-        echo "  Password: (see .credentials file)"
-        echo ""
-    fi
-    
     echo "═══════════════════════════════════════════════════"
+    echo ""
+    echo "Credentials: $INSTALL_DIR/.credentials"
+    echo "Logs: $INSTALL_DIR/logs/"
     echo ""
 }
 
@@ -1028,8 +1111,12 @@ run_onestack_setup() {
     check_root
     load_vars
     
-    if [ -z "$INSTALL_DIR" ] || [ -z "$PRIMARY_DOMAIN" ]; then
-        error_exit "INSTALL_DIR or PRIMARY_DOMAIN not set"
+    if [ -z "$INSTALL_DIR" ]; then
+        error_exit "INSTALL_DIR not set"
+    fi
+    
+    if [ -z "$PRIMARY_DOMAIN" ]; then
+        error_exit "PRIMARY_DOMAIN not set"
     fi
     
     check_nginx_conflict
@@ -1050,7 +1137,7 @@ run_onestack_setup() {
     
     save_var "PHASE_2_COMPLETE" "true"
     
-    success_message "OneStack deployed successfully! 🎉"
+    success_message "OneStack deployed! 🎉"
 }
 
 export -f run_onestack_setup
