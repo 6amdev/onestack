@@ -381,19 +381,3 @@ main() {
 # Run
 check_root
 main
-```
-
----
-
-## 🎯 **คำตอบ: เพิ่ม n8n.sixamdev.com ยังไง?**
-
----
-
-## 📝 **วิธีเพิ่ม Subdomain ใหม่ (n8n):**
-
-### **Step 1: DNS (ไม่ต้องทำ - มี wildcard แล้ว)**
-```
-✅ DNS: ไม่ต้องเพิ่ม!
-   CNAME * → sixamdev.com (มีอยู่แล้ว)
-   
-   n8n.sixamdev.com จะชี้มา server อัตโนมัติ!
