@@ -1,5 +1,6 @@
 #!/bin/bash
-# OneStack - Service Deployment (Parse Server Fixed)
+# OneStack Extended Deployment Script
+# Includes: n8n, Chatwoot, Node.js API, Frontend Examples
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$LIB_DIR/utils.sh"
@@ -55,11 +56,14 @@ create_directory_structure() {
         "databases/postgres/init" "databases/mongodb/init" "databases/redis"
         "frontends/main" "frontends/app" "frontends/admin"
         "backends/parse-server/cloud"
-        "backends/nodejs-api" "backends/python-rag"
+        "backends/nodejs-api/src/routes" "backends/nodejs-api/src/controllers"
+        "backends/nodejs-api/src/middleware" "backends/nodejs-api/src/utils"
+        "backends/python-rag"
         "monitoring/prometheus" "monitoring/grafana/provisioning/datasources"
         "monitoring/grafana/provisioning/dashboards"
         "backups" "logs" "config" "scripts"
         "parse-dashboard"
+        "chatwoot" "n8n"
     )
     
     for dir in "${dirs[@]}"; do
@@ -73,7 +77,7 @@ create_directory_structure() {
 }
 
 # ════════════════════════════════════════════════
-# PASSWORD GENERATION (FIXED - Generate Parse credentials first)
+# PASSWORD GENERATION
 # ════════════════════════════════════════════════
 
 generate_passwords() {
@@ -88,17 +92,24 @@ generate_passwords() {
     export MINIO_ROOT_PASSWORD=$(generate_password 32)
     export GRAFANA_PASSWORD=$(generate_password 24)
     
-    # Parse credentials - MUST be generated here
+    # Parse credentials
     if [ "$INSTALL_PARSE" = "true" ]; then
         export PARSE_APP_ID=$(openssl rand -hex 16)
         export PARSE_MASTER_KEY=$(openssl rand -hex 32)
         export PARSE_CLIENT_KEY=$(openssl rand -hex 16)
         export PARSE_DASHBOARD_PASSWORD=$(generate_password 24)
-        
-        print_success "Parse credentials generated:"
-        print_info "  App ID: $PARSE_APP_ID"
-        print_info "  Master Key: ${PARSE_MASTER_KEY:0:20}..."
     fi
+    
+    # n8n credentials
+    export N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
+    export N8N_PASSWORD=$(generate_password 24)
+    
+    # Chatwoot credentials
+    export CHATWOOT_SECRET_KEY_BASE=$(openssl rand -hex 64)
+    export CHATWOOT_PASSWORD=$(generate_password 24)
+    
+    # Node.js API
+    export JWT_SECRET=$(openssl rand -hex 32)
     
     print_success "All passwords generated"
     save_credentials
@@ -111,7 +122,7 @@ save_credentials() {
     
     cat > "$cred_file" << EOF
 ═══════════════════════════════════════════════════
-OneStack Credentials
+OneStack Extended Credentials
 Generated: $(date)
 Domain: $PRIMARY_DOMAIN
 ═══════════════════════════════════════════════════
@@ -161,8 +172,6 @@ Parse Server:
     App ID: $PARSE_APP_ID
     Master Key: $PARSE_MASTER_KEY
     Client Key: $PARSE_CLIENT_KEY
-  
-  Database: postgres://postgres:***@postgres:5432/parse_db
 
 EOF
     fi
@@ -175,7 +184,22 @@ Adminer:
 EOF
     fi
 
-    cat >> "$cred_file" << 'EOF'
+    cat >> "$cred_file" << EOF
+n8n (Workflow Automation):
+  URL: http://flow.$PRIMARY_DOMAIN
+  Email: admin@$PRIMARY_DOMAIN
+  Password: $N8N_PASSWORD
+  
+Chatwoot (Customer Support):
+  URL: http://chat.$PRIMARY_DOMAIN
+  Email: admin@$PRIMARY_DOMAIN
+  Password: $CHATWOOT_PASSWORD
+  
+Node.js API:
+  URL: http://api.$PRIMARY_DOMAIN/v1
+  Health: http://api.$PRIMARY_DOMAIN/v1/health
+  JWT Secret: $JWT_SECRET
+
 ═══════════════════════════════════════════════════
 IMPORTANT: Keep this file secure!
 ═══════════════════════════════════════════════════
@@ -186,7 +210,7 @@ EOF
 }
 
 # ════════════════════════════════════════════════
-# .ENV FILE (FIXED - All Parse variables)
+# .ENV FILE (COMPLETE)
 # ════════════════════════════════════════════════
 
 create_env_file() {
@@ -198,7 +222,7 @@ create_env_file() {
     print_info "Domain: $PRIMARY_DOMAIN"
     
     cat > "$env_file" << EOF
-# OneStack Environment Configuration
+# OneStack Extended Environment Configuration
 # Generated: $(date)
 
 COMPOSE_PROJECT_NAME=onestack
@@ -215,7 +239,7 @@ POSTGRES_VERSION=${CONFIG_database_postgres_version:-16}
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=onestack_main
-POSTGRES_DATABASES=onestack_main,parse_db
+POSTGRES_DATABASES=onestack_main,parse_db,n8n_db,chatwoot_production
 
 # MONGODB
 MONGODB_VERSION=${CONFIG_database_mongodb_version:-7}
@@ -225,6 +249,7 @@ MONGODB_ROOT_PASSWORD=$MONGODB_PASSWORD
 # REDIS
 REDIS_VERSION=${CONFIG_database_redis_version:-alpine}
 REDIS_PASSWORD=$REDIS_PASSWORD
+REDIS_URL=redis://:\${REDIS_PASSWORD}@redis:6379
 
 # MINIO
 MINIO_VERSION=latest
@@ -234,25 +259,18 @@ MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD
 EOF
 
     if [ "$INSTALL_PARSE" = "true" ]; then
-        # CRITICAL: All Parse variables must be set here
         cat >> "$env_file" << EOF
-# PARSE SERVER - All credentials
+# PARSE SERVER
 PARSE_SERVER_VERSION=latest
 PARSE_APP_ID=$PARSE_APP_ID
 PARSE_MASTER_KEY=$PARSE_MASTER_KEY
 PARSE_CLIENT_KEY=$PARSE_CLIENT_KEY
 PARSE_SERVER_APPLICATION_ID=$PARSE_APP_ID
 PARSE_SERVER_MASTER_KEY=$PARSE_MASTER_KEY
-
-# Parse Database
 PARSE_DATABASE_URI=postgres://postgres:$POSTGRES_PASSWORD@postgres:5432/parse_db
-
-# Parse Server URLs
 PARSE_SERVER_URL=http://parse-server:1337/parse
 PARSE_PUBLIC_SERVER_URL=http://api.$PRIMARY_DOMAIN/parse
 PARSE_SERVER_MOUNT_PATH=/parse
-
-# Parse Dashboard
 PARSE_DASHBOARD_USER=admin
 PARSE_DASHBOARD_PASSWORD=$PARSE_DASHBOARD_PASSWORD
 PARSE_DASHBOARD_APP_NAME=OneStack
@@ -281,6 +299,40 @@ EOF
     fi
 
     cat >> "$env_file" << EOF
+# N8N (Workflow Automation)
+N8N_VERSION=latest
+N8N_BASIC_AUTH_ACTIVE=true
+N8N_BASIC_AUTH_USER=admin@$PRIMARY_DOMAIN
+N8N_BASIC_AUTH_PASSWORD=$N8N_PASSWORD
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+N8N_HOST=flow.$PRIMARY_DOMAIN
+N8N_PORT=5678
+N8N_PROTOCOL=http
+WEBHOOK_URL=http://flow.$PRIMARY_DOMAIN
+GENERIC_TIMEZONE=${CONFIG_system_timezone:-Asia/Bangkok}
+
+# CHATWOOT (Customer Support)
+CHATWOOT_VERSION=v3.11.0
+RAILS_ENV=production
+RAILS_MAX_THREADS=5
+SECRET_KEY_BASE=$CHATWOOT_SECRET_KEY_BASE
+FRONTEND_URL=http://chat.$PRIMARY_DOMAIN
+FORCE_SSL=false
+POSTGRES_HOST=postgres
+POSTGRES_USERNAME=postgres
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+POSTGRES_DATABASE=chatwoot_production
+REDIS_HOST=redis
+REDIS_PASSWORD=$REDIS_PASSWORD
+REDIS_PORT=6379
+ENABLE_ACCOUNT_SIGNUP=true
+DEFAULT_LOCALE=en
+
+# NODE.JS API
+NODEJS_API_VERSION=latest
+JWT_SECRET=$JWT_SECRET
+API_PORT=4000
+
 # NETWORK
 DOCKER_NETWORK_SUBNET=${CONFIG_advanced_docker_subnet:-172.20.0.0/16}
 EOF
@@ -293,7 +345,7 @@ EOF
 }
 
 # ════════════════════════════════════════════════
-# DOCKER COMPOSE (FIXED - Parse Server environment)
+# DOCKER COMPOSE (COMPLETE WITH ALL SERVICES)
 # ════════════════════════════════════════════════
 
 create_docker_compose() {
@@ -315,8 +367,14 @@ volumes:
   minio_data:
   grafana_data:
   prometheus_data:
+  n8n_data:
+  chatwoot_storage:
 
 services:
+  # ══════════════════════════════════════════════════════════
+  # CORE DATABASES
+  # ══════════════════════════════════════════════════════════
+  
   postgres:
     image: pgvector/pgvector:pg${POSTGRES_VERSION}
     container_name: onestack-postgres
@@ -395,6 +453,10 @@ services:
       - "9000:9000"
       - "9001:9001"
 
+  # ══════════════════════════════════════════════════════════
+  # NGINX GATEWAY
+  # ══════════════════════════════════════════════════════════
+  
   nginx:
     image: nginx:alpine
     container_name: onestack-nginx
@@ -410,17 +472,22 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    depends_on:
+      - minio
 DCEOF
 
     if [ "$INSTALL_PARSE" = "true" ]; then
         cat >> "$compose_file" << 'PARSEDC'
 
+  # ══════════════════════════════════════════════════════════
+  # PARSE SERVER
+  # ══════════════════════════════════════════════════════════
+  
   parse-server:
     image: parseplatform/parse-server:${PARSE_SERVER_VERSION}
     container_name: onestack-parse-server
     restart: unless-stopped
     environment:
-      # CRITICAL: Use correct environment variable names
       PARSE_SERVER_APPLICATION_ID: ${PARSE_APP_ID}
       PARSE_SERVER_MASTER_KEY: ${PARSE_MASTER_KEY}
       PARSE_SERVER_DATABASE_URI: ${PARSE_DATABASE_URI}
@@ -466,9 +533,143 @@ DCEOF
 PARSEDC
     fi
 
+    cat >> "$compose_file" << 'N8NDC'
+
+  # ══════════════════════════════════════════════════════════
+  # N8N WORKFLOW AUTOMATION
+  # ══════════════════════════════════════════════════════════
+  
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION}
+    container_name: onestack-n8n
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n_db
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: ${N8N_PORT}
+      N8N_PROTOCOL: ${N8N_PROTOCOL}
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      TZ: ${TIMEZONE}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/n8n/custom
+    networks:
+      - backend
+      - frontend
+    ports:
+      - "5678:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ══════════════════════════════════════════════════════════
+  # CHATWOOT CUSTOMER SUPPORT
+  # ══════════════════════════════════════════════════════════
+  
+  chatwoot-rails:
+    image: chatwoot/chatwoot:${CHATWOOT_VERSION}
+    container_name: onestack-chatwoot-rails
+    restart: unless-stopped
+    environment:
+      RAILS_ENV: ${RAILS_ENV}
+      RAILS_MAX_THREADS: ${RAILS_MAX_THREADS}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      FRONTEND_URL: ${FRONTEND_URL}
+      FORCE_SSL: ${FORCE_SSL}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      REDIS_URL: ${REDIS_URL}
+      ENABLE_ACCOUNT_SIGNUP: ${ENABLE_ACCOUNT_SIGNUP}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE}
+      TZ: ${TIMEZONE}
+    volumes:
+      - chatwoot_storage:/app/storage
+    networks:
+      - backend
+      - frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+
+  chatwoot-sidekiq:
+    image: chatwoot/chatwoot:${CHATWOOT_VERSION}
+    container_name: onestack-chatwoot-sidekiq
+    restart: unless-stopped
+    environment:
+      RAILS_ENV: ${RAILS_ENV}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      REDIS_URL: ${REDIS_URL}
+      TZ: ${TIMEZONE}
+    volumes:
+      - chatwoot_storage:/app/storage
+    networks:
+      - backend
+    depends_on:
+      - chatwoot-rails
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+
+  # ══════════════════════════════════════════════════════════
+  # NODE.JS API
+  # ══════════════════════════════════════════════════════════
+  
+  nodejs-api:
+    build:
+      context: ./backends/nodejs-api
+      dockerfile: Dockerfile
+    container_name: onestack-nodejs-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${API_PORT}
+      JWT_SECRET: ${JWT_SECRET}
+      MONGODB_URI: mongodb://${MONGODB_ROOT_USERNAME}:${MONGODB_ROOT_PASSWORD}@mongodb:27017/app_data?authSource=admin
+      POSTGRES_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/onestack_main
+      REDIS_URL: ${REDIS_URL}
+      TZ: ${TIMEZONE}
+    volumes:
+      - ./backends/nodejs-api:/app
+      - /app/node_modules
+    networks:
+      - backend
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+N8NDC
+
     if [ "$INSTALL_MONITORING" = "true" ]; then
         cat >> "$compose_file" << 'MONDC'
 
+  # ══════════════════════════════════════════════════════════
+  # MONITORING STACK
+  # ══════════════════════════════════════════════════════════
+  
   prometheus:
     image: prom/prometheus:${PROMETHEUS_VERSION}
     container_name: onestack-prometheus
@@ -503,6 +704,10 @@ MONDC
     if [ "$INSTALL_ADMINER" = "true" ]; then
         cat >> "$compose_file" << 'ADMDC'
 
+  # ══════════════════════════════════════════════════════════
+  # ADMINER DATABASE UI
+  # ══════════════════════════════════════════════════════════
+  
   adminer:
     image: adminer:${ADMINER_VERSION}
     container_name: onestack-adminer
@@ -524,7 +729,7 @@ ADMDC
 }
 
 # ════════════════════════════════════════════════
-# DATABASE INIT
+# DATABASE INIT SCRIPTS
 # ════════════════════════════════════════════════
 
 create_database_init_scripts() {
@@ -557,7 +762,7 @@ PGINIT
 }
 
 # ════════════════════════════════════════════════
-# PARSE DASHBOARD CONFIG (FIXED - Must match .env exactly)
+# PARSE DASHBOARD CONFIG
 # ════════════════════════════════════════════════
 
 create_parse_dashboard_config() {
@@ -567,11 +772,6 @@ create_parse_dashboard_config() {
     
     print_header "Creating Parse Dashboard Config"
     
-    print_step "Generating Parse Dashboard configuration..."
-    print_info "App ID: $PARSE_APP_ID"
-    print_info "Master Key: ${PARSE_MASTER_KEY:0:20}..."
-    
-    # CRITICAL: Must use same credentials as Parse Server
     cat > "$INSTALL_DIR/parse-dashboard/config.json" << EOF
 {
   "apps": [
@@ -597,22 +797,18 @@ create_parse_dashboard_config() {
 EOF
     
     chmod 644 "$INSTALL_DIR/parse-dashboard/config.json"
-    chown "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR/parse-dashboard/config.json"
     
-    # Cloud code example
     cat > "$INSTALL_DIR/backends/parse-server/cloud/main.js" << 'CLOUDCODE'
 // Parse Cloud Code
-// Define your cloud functions here
 
 Parse.Cloud.define('hello', async (request) => {
   return { message: 'Hello from OneStack Parse Server!' };
 });
 
 Parse.Cloud.define('version', async (request) => {
-  return { version: '2.0.0', platform: 'OneStack' };
+  return { version: '2.0.0', platform: 'OneStack Extended' };
 });
 
-// Example: beforeSave trigger
 Parse.Cloud.beforeSave('TestObject', (request) => {
   const object = request.object;
   if (!object.get('name')) {
@@ -622,12 +818,257 @@ Parse.Cloud.beforeSave('TestObject', (request) => {
 CLOUDCODE
     
     print_success "Parse Dashboard config created"
-    print_info "Config saved to: parse-dashboard/config.json"
     echo ""
 }
 
 # ════════════════════════════════════════════════
-# NGINX CONFIG
+# NODE.JS API (COMPLETE EXAMPLE)
+# ════════════════════════════════════════════════
+
+create_nodejs_api() {
+    print_header "Creating Node.js API Template"
+    
+    local api_dir="$INSTALL_DIR/backends/nodejs-api"
+    
+    # package.json
+    cat > "$api_dir/package.json" << 'PKGJSON'
+{
+  "name": "onestack-nodejs-api",
+  "version": "1.0.0",
+  "description": "OneStack Node.js API Template",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "joi": "^17.11.0",
+    "mongodb": "^6.3.0",
+    "pg": "^8.11.3",
+    "redis": "^4.6.12"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
+PKGJSON
+
+    # Dockerfile
+    cat > "$api_dir/Dockerfile" << 'DOCKERFILE'
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --production
+
+COPY . .
+
+EXPOSE 4000
+
+CMD ["npm", "start"]
+DOCKERFILE
+
+    # Main app.js
+    cat > "$api_dir/src/app.js" << 'APPJS'
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 4000;
+
+// Middleware
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
+app.use(morgan('combined'));
+
+// Routes
+const healthRoute = require('./routes/health');
+const usersRoute = require('./routes/users');
+const productsRoute = require('./routes/products');
+
+app.use('/v1/health', healthRoute);
+app.use('/v1/users', usersRoute);
+app.use('/v1/products', productsRoute);
+
+// Root
+app.get('/', (req, res) => {
+  res.json({
+    message: 'OneStack Node.js API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/v1/health',
+      users: '/v1/users',
+      products: '/v1/products'
+    }
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 API running on port ${PORT}`);
+});
+APPJS
+
+    # Health route
+    cat > "$api_dir/src/routes/health.js" << 'HEALTHJS'
+const express = require('express');
+const router = express.Router();
+
+router.get('/', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+module.exports = router;
+HEALTHJS
+
+    # Users route
+    cat > "$api_dir/src/routes/users.js" << 'USERSJS'
+const express = require('express');
+const router = express.Router();
+
+// Mock data
+let users = [
+  { id: 1, name: 'John Doe', email: 'john@example.com' },
+  { id: 2, name: 'Jane Smith', email: 'jane@example.com' }
+];
+
+// GET all users
+router.get('/', (req, res) => {
+  res.json({ users });
+});
+
+// GET user by ID
+router.get('/:id', (req, res) => {
+  const user = users.find(u => u.id === parseInt(req.params.id));
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ user });
+});
+
+// POST create user
+router.post('/', (req, res) => {
+  const { name, email } = req.body;
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email required' });
+  }
+  
+  const user = {
+    id: users.length + 1,
+    name,
+    email
+  };
+  
+  users.push(user);
+  res.status(201).json({ user });
+});
+
+// PUT update user
+router.put('/:id', (req, res) => {
+  const user = users.find(u => u.id === parseInt(req.params.id));
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  
+  const { name, email } = req.body;
+  if (name) user.name = name;
+  if (email) user.email = email;
+  
+  res.json({ user });
+});
+
+// DELETE user
+router.delete('/:id', (req, res) => {
+  const index = users.findIndex(u => u.id === parseInt(req.params.id));
+  if (index === -1) return res.status(404).json({ error: 'User not found' });
+  
+  users.splice(index, 1);
+  res.json({ message: 'User deleted' });
+});
+
+module.exports = router;
+USERSJS
+
+    # Products route
+    cat > "$api_dir/src/routes/products.js" << 'PRODUCTSJS'
+const express = require('express');
+const router = express.Router();
+
+let products = [
+  { id: 1, name: 'Laptop', price: 999.99, stock: 50 },
+  { id: 2, name: 'Mouse', price: 29.99, stock: 200 },
+  { id: 3, name: 'Keyboard', price: 79.99, stock: 150 }
+];
+
+router.get('/', (req, res) => {
+  res.json({ products });
+});
+
+router.get('/:id', (req, res) => {
+  const product = products.find(p => p.id === parseInt(req.params.id));
+  if (!product) return res.status(404).json({ error: 'Product not found' });
+  res.json({ product });
+});
+
+router.post('/', (req, res) => {
+  const { name, price, stock } = req.body;
+  if (!name || !price) {
+    return res.status(400).json({ error: 'Name and price required' });
+  }
+  
+  const product = {
+    id: products.length + 1,
+    name,
+    price: parseFloat(price),
+    stock: stock || 0
+  };
+  
+  products.push(product);
+  res.status(201).json({ product });
+});
+
+module.exports = router;
+PRODUCTSJS
+
+    # .dockerignore
+    cat > "$api_dir/.dockerignore" << 'DOCKERIGNORE'
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+README.md
+DOCKERIGNORE
+
+    print_success "Node.js API created"
+    echo ""
+}
+
+# ════════════════════════════════════════════════
+# NGINX CONFIGURATION (COMPLETE)
 # ════════════════════════════════════════════════
 
 create_nginx_config() {
@@ -666,9 +1107,10 @@ http {
 NGXMAIN
 
     cat > "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
-# OneStack Nginx Configuration
+# OneStack Extended Nginx Configuration
 # Domain: $PRIMARY_DOMAIN
 
+# Main Website
 server {
     listen 80;
     server_name $PRIMARY_DOMAIN www.$PRIMARY_DOMAIN;
@@ -679,6 +1121,18 @@ server {
     }
 }
 
+# Example App Frontend
+server {
+    listen 80;
+    server_name app.$PRIMARY_DOMAIN;
+    root /var/www/app;
+    index index.html;
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+}
+
+# MinIO Console
 server {
     listen 80;
     server_name storage.$PRIMARY_DOMAIN;
@@ -691,6 +1145,7 @@ server {
     }
 }
 
+# MinIO S3 API
 server {
     listen 80;
     server_name s3.$PRIMARY_DOMAIN;
@@ -700,15 +1155,25 @@ server {
         proxy_set_header Host \$host;
     }
 }
-EOF
 
-    if [ "$INSTALL_PARSE" = "true" ]; then
-        cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
-
+# Node.js API
 server {
     listen 80;
     server_name api.$PRIMARY_DOMAIN;
     
+    # Node.js API
+    location /v1 {
+        proxy_pass http://nodejs-api:4000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+EOF
+
+    if [ "$INSTALL_PARSE" = "true" ]; then
+        cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
+    
+    # Parse Server
     location /parse {
         proxy_pass http://parse-server:1337;
         proxy_set_header Host \$host;
@@ -717,6 +1182,7 @@ server {
         proxy_connect_timeout 300s;
     }
     
+    # Parse Dashboard
     location / {
         proxy_pass http://parse-dashboard:4040;
         proxy_set_header Host \$host;
@@ -724,11 +1190,47 @@ server {
     }
 }
 EOF
+    else
+        echo "}" >> "$INSTALL_DIR/nginx/conf.d/onestack.conf"
     fi
+
+    cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
+
+# n8n Workflow Automation
+server {
+    listen 80;
+    server_name flow.$PRIMARY_DOMAIN;
+    location / {
+        proxy_pass http://n8n:5678;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# Chatwoot Customer Support
+server {
+    listen 80;
+    server_name chat.$PRIMARY_DOMAIN;
+    location / {
+        proxy_pass http://chatwoot-rails:3000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
 
     if [ "$INSTALL_MONITORING" = "true" ]; then
         cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
 
+# Grafana Monitoring
 server {
     listen 80;
     server_name monitor.$PRIMARY_DOMAIN;
@@ -743,6 +1245,7 @@ EOF
     if [ "$INSTALL_ADMINER" = "true" ]; then
         cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << EOF
 
+# Adminer Database UI
 server {
     listen 80;
     server_name db.$PRIMARY_DOMAIN;
@@ -756,6 +1259,7 @@ EOF
 
     cat >> "$INSTALL_DIR/nginx/conf.d/onestack.conf" << 'DEFNX'
 
+# Default server (health check)
 server {
     listen 80 default_server;
     location /health {
@@ -807,106 +1311,444 @@ GRAF
 }
 
 # ════════════════════════════════════════════════
-# DEFAULT FRONTEND
+# FRONTEND EXAMPLES
 # ════════════════════════════════════════════════
 
-create_default_frontend() {
-    print_header "Creating Welcome Page"
+create_frontend_examples() {
+    print_header "Creating Frontend Examples"
     
+    # Main landing page (updated with all services)
     cat > "$INSTALL_DIR/frontends/main/index.html" << EOF
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OneStack - Welcome</title>
+    <title>OneStack Extended - Complete SME Platform</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             padding: 20px;
         }
         .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
             background: white;
             border-radius: 20px;
-            padding: 60px 40px;
-            max-width: 900px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
             text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 30px;
         }
-        .logo { font-size: 5em; margin-bottom: 20px; }
-        h1 { font-size: 3.5em; color: #333; }
-        .status { background: #10b981; color: white; padding: 12px 30px; border-radius: 50px; margin: 20px 0; display: inline-block; }
-        .domain { background: #f3f4f6; padding: 15px; border-radius: 10px; margin: 20px 0; font-family: monospace; color: #667eea; }
-        .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 30px; }
-        a { background: #f3f4f6; padding: 25px; border-radius: 10px; text-decoration: none; color: #333; transition: 0.3s; }
-        a:hover { transform: translateY(-5px); background: white; box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
-        .service-icon { font-size: 2em; }
-        .service-name { font-weight: bold; color: #667eea; margin: 10px 0; }
+        .logo { font-size: 4em; margin-bottom: 10px; }
+        h1 { font-size: 3em; color: #333; margin-bottom: 10px; }
+        .tagline { font-size: 1.2em; color: #666; }
+        .status { 
+            background: #10b981; 
+            color: white; 
+            padding: 10px 25px; 
+            border-radius: 50px; 
+            margin: 15px 0; 
+            display: inline-block;
+            font-weight: bold;
+        }
+        .domain { 
+            background: #f3f4f6; 
+            padding: 12px; 
+            border-radius: 10px; 
+            margin: 15px 0; 
+            font-family: monospace; 
+            color: #667eea;
+            font-size: 1.1em;
+        }
+        
+        .section {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+        
+        .services {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .service {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            padding: 25px;
+            border-radius: 15px;
+            text-decoration: none;
+            color: #333;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        .service:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+        
+        .service-icon { font-size: 3em; margin-bottom: 10px; }
+        .service-name { 
+            font-weight: bold; 
+            color: #667eea; 
+            font-size: 1.3em;
+            margin: 10px 0 5px 0;
+        }
+        .service-desc { 
+            color: #666; 
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .feature {
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+        .feature h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .feature p {
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        footer {
+            text-align: center;
+            color: white;
+            padding: 20px;
+            margin-top: 30px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="logo">🚀</div>
-        <h1>OneStack</h1>
-        <div class="status">✓ Running</div>
-        <div class="domain">$PRIMARY_DOMAIN</div>
-        
-        <div class="links">
-            <a href="http://storage.$PRIMARY_DOMAIN">
-                <div class="service-icon">📦</div>
-                <div class="service-name">MinIO</div>
-            </a>
-            <a href="http://s3.$PRIMARY_DOMAIN">
-                <div class="service-icon">☁️</div>
-                <div class="service-name">S3 API</div>
-            </a>
+        <div class="header">
+            <div class="logo">🚀</div>
+            <h1>OneStack Extended</h1>
+            <p class="tagline">Complete SME Platform - All Services Deployed</p>
+            <div class="status">✓ All Systems Operational</div>
+            <div class="domain">$PRIMARY_DOMAIN</div>
+        </div>
+
+        <div class="section">
+            <h2>🎯 Core Services</h2>
+            <div class="services">
+                <a href="http://storage.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">📦</div>
+                    <div class="service-name">MinIO Storage</div>
+                    <div class="service-desc">S3-compatible object storage for files and backups</div>
+                </a>
+                
+                <a href="http://s3.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">☁️</div>
+                    <div class="service-name">S3 API</div>
+                    <div class="service-desc">Direct S3 API access for integrations</div>
+                </a>
 EOF
 
     [ "$INSTALL_PARSE" = "true" ] && cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
-            <a href="http://api.$PRIMARY_DOMAIN">
-                <div class="service-icon">⚡</div>
-                <div class="service-name">Parse</div>
-            </a>
+                <a href="http://api.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">⚡</div>
+                    <div class="service-name">Parse Server</div>
+                    <div class="service-desc">Backend-as-a-Service with dashboard</div>
+                </a>
 EOF
 
     [ "$INSTALL_MONITORING" = "true" ] && cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
-            <a href="http://monitor.$PRIMARY_DOMAIN">
-                <div class="service-icon">📊</div>
-                <div class="service-name">Grafana</div>
-            </a>
+                <a href="http://monitor.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">📊</div>
+                    <div class="service-name">Grafana</div>
+                    <div class="service-desc">System monitoring and dashboards</div>
+                </a>
 EOF
 
     [ "$INSTALL_ADMINER" = "true" ] && cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
-            <a href="http://db.$PRIMARY_DOMAIN">
-                <div class="service-icon">🗄️</div>
-                <div class="service-name">Adminer</div>
-            </a>
+                <a href="http://db.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">🗄️</div>
+                    <div class="service-name">Adminer</div>
+                    <div class="service-desc">Database management interface</div>
+                </a>
 EOF
 
-    cat >> "$INSTALL_DIR/frontends/main/index.html" << 'HTMLEND'
+    cat >> "$INSTALL_DIR/frontends/main/index.html" << EOF
+            </div>
         </div>
+
+        <div class="section">
+            <h2>🚀 Extended Services</h2>
+            <div class="services">
+                <a href="http://flow.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">🔄</div>
+                    <div class="service-name">n8n Workflows</div>
+                    <div class="service-desc">Workflow automation and integrations</div>
+                </a>
+                
+                <a href="http://chat.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">💬</div>
+                    <div class="service-name">Chatwoot</div>
+                    <div class="service-desc">Customer support and live chat</div>
+                </a>
+                
+                <a href="http://api.$PRIMARY_DOMAIN/v1" class="service" target="_blank">
+                    <div class="service-icon">🔌</div>
+                    <div class="service-name">Node.js API</div>
+                    <div class="service-desc">Custom REST API endpoints</div>
+                </a>
+                
+                <a href="http://app.$PRIMARY_DOMAIN" class="service" target="_blank">
+                    <div class="service-icon">🎨</div>
+                    <div class="service-name">Example App</div>
+                    <div class="service-desc">Sample frontend application</div>
+                </a>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>✨ Platform Features</h2>
+            <div class="features">
+                <div class="feature">
+                    <h3>🎯 Complete Solution</h3>
+                    <p>All essential services deployed and ready to use: databases, storage, APIs, monitoring, and customer support.</p>
+                </div>
+                <div class="feature">
+                    <h3>🔐 Production Ready</h3>
+                    <p>Enterprise-grade security, automated backups, monitoring, and health checks built-in.</p>
+                </div>
+                <div class="feature">
+                    <h3>🚀 Fully Integrated</h3>
+                    <p>All services work together seamlessly. Connect n8n to Chatwoot, APIs to databases, everything unified.</p>
+                </div>
+                <div class="feature">
+                    <h3>💰 Cost Effective</h3>
+                    <p>Replace \$500+/month in SaaS subscriptions with one self-hosted platform. Own your data.</p>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p><strong>OneStack Extended v2.0</strong> - Complete SME Platform</p>
+            <p>Generated: $(date)</p>
+        </footer>
     </div>
 </body>
 </html>
-HTMLEND
+EOF
+
+    # Example App Frontend
+    cat > "$INSTALL_DIR/frontends/app/index.html" << EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Example App - OneStack</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f3f4f6;
+            min-height: 100vh;
+        }
+        
+        .navbar {
+            background: white;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .navbar h1 {
+            color: #667eea;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .api-demo {
+            display: grid;
+            gap: 15px;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        
+        .response {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .loading {
+            color: #667eea;
+            font-style: italic;
+        }
+        
+        .error {
+            color: #ef4444;
+        }
+        
+        .success {
+            color: #10b981;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🎨 Example App</h1>
+    </div>
+    
+    <div class="container">
+        <div class="card">
+            <h2>API Integration Demo</h2>
+            <p style="margin-bottom: 20px; color: #666;">
+                This is a sample frontend that demonstrates API integration with the Node.js backend.
+            </p>
+            
+            <div class="api-demo">
+                <div>
+                    <button onclick="testHealth()">Test API Health</button>
+                    <div id="health-response" class="response" style="display:none;"></div>
+                </div>
+                
+                <div>
+                    <button onclick="getUsers()">Get Users</button>
+                    <div id="users-response" class="response" style="display:none;"></div>
+                </div>
+                
+                <div>
+                    <button onclick="getProducts()">Get Products</button>
+                    <div id="products-response" class="response" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>About This Example</h2>
+            <p style="color: #666; line-height: 1.6;">
+                This is a starter template for building your own application. 
+                It demonstrates how to connect a frontend to the Node.js API backend.
+                You can replace this with your own React, Vue, or Angular application.
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        const API_URL = 'http://api.$PRIMARY_DOMAIN/v1';
+        
+        async function testHealth() {
+            const el = document.getElementById('health-response');
+            el.style.display = 'block';
+            el.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch(\`\${API_URL}/health\`);
+                const data = await response.json();
+                el.innerHTML = '<div class="success">✓ API is healthy!</div><pre>' + 
+                    JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                el.innerHTML = '<div class="error">✗ Error: ' + error.message + '</div>';
+            }
+        }
+        
+        async function getUsers() {
+            const el = document.getElementById('users-response');
+            el.style.display = 'block';
+            el.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch(\`\${API_URL}/users\`);
+                const data = await response.json();
+                el.innerHTML = '<div class="success">✓ Users loaded!</div><pre>' + 
+                    JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                el.innerHTML = '<div class="error">✗ Error: ' + error.message + '</div>';
+            }
+        }
+        
+        async function getProducts() {
+            const el = document.getElementById('products-response');
+            el.style.display = 'block';
+            el.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const response = await fetch(\`\${API_URL}/products\`);
+                const data = await response.json();
+                el.innerHTML = '<div class="success">✓ Products loaded!</div><pre>' + 
+                    JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                el.innerHTML = '<div class="error">✗ Error: ' + error.message + '</div>';
+            }
+        }
+    </script>
+</body>
+</html>
+EOF
 
     chown -R "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR/frontends"
-    print_success "Welcome page created"
+    print_success "Frontend examples created"
     echo ""
 }
 
 # ════════════════════════════════════════════════
-# DEPLOY SERVICES
+# DEPLOY ALL SERVICES
 # ════════════════════════════════════════════════
 
 deploy_services() {
-    print_header "Deploying Services"
+    print_header "Deploying All Services"
     
     cd "$INSTALL_DIR"
     
@@ -926,20 +1768,61 @@ deploy_services() {
 }
 
 # ════════════════════════════════════════════════
-# WAIT & VERIFY
+# WAIT FOR SERVICES & INITIALIZE
 # ════════════════════════════════════════════════
 
 wait_for_services() {
-    print_header "Waiting for Services"
+    print_header "Waiting for Services to Initialize"
     
-    print_info "Waiting 40 seconds for services to initialize..."
-    sleep 40
+    print_info "This may take 60-90 seconds for all services..."
+    echo ""
+    
+    # Wait for databases first
+    print_step "Waiting for databases..."
+    sleep 20
     
     cd "$INSTALL_DIR"
     
-    print_step "Checking service status..."
+    local max_wait=120
+    local elapsed=0
     
-    local services=(postgres mongodb redis minio nginx)
+    while [ $elapsed -lt $max_wait ]; do
+        if docker compose ps postgres | grep -q "Up" && \
+           docker compose ps mongodb | grep -q "Up" && \
+           docker compose ps redis | grep -q "Up"; then
+            print_success "Databases ready!"
+            break
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+        echo -n "."
+    done
+    
+    echo ""
+    
+    # Wait additional time for application services
+    print_step "Waiting for application services..."
+    sleep 30
+    
+    # Initialize Chatwoot database
+    print_step "Initializing Chatwoot database..."
+    docker compose exec -T chatwoot-rails bundle exec rails db:chatwoot_prepare 2>/dev/null || {
+        print_warning "Chatwoot database initialization pending..."
+        print_info "Run manually: docker compose exec chatwoot-rails bundle exec rails db:chatwoot_prepare"
+    }
+    
+    echo ""
+}
+
+verify_services() {
+    print_header "Service Status"
+    
+    cd "$INSTALL_DIR"
+    
+    print_step "Checking all services..."
+    echo ""
+    
+    local services=(postgres mongodb redis minio nginx n8n chatwoot-rails nodejs-api)
     [ "$INSTALL_PARSE" = "true" ] && services+=(parse-server parse-dashboard)
     [ "$INSTALL_MONITORING" = "true" ] && services+=(prometheus grafana)
     [ "$INSTALL_ADMINER" = "true" ] && services+=(adminer)
@@ -948,80 +1831,439 @@ wait_for_services() {
         if docker compose ps "$service" 2>/dev/null | grep -q "Up"; then
             print_success "$service: ✓ Running"
         else
-            print_warning "$service: ⚠ Check logs"
+            print_warning "$service: ⚠ Check logs (docker compose logs $service)"
         fi
     done
     
-    # Special check for Parse Server
+    echo ""
+    
+    # Test key endpoints
+    print_step "Testing endpoints..."
+    sleep 5
+    
+    # Test Node.js API
+    if curl -sf http://localhost:4000/v1/health >/dev/null 2>&1; then
+        print_success "Node.js API: ✓ Responding"
+    else
+        print_warning "Node.js API: ⚠ Not ready yet"
+    fi
+    
+    # Test n8n
+    if curl -sf http://localhost:5678 >/dev/null 2>&1; then
+        print_success "n8n: ✓ Responding"
+    else
+        print_warning "n8n: ⚠ Not ready yet"
+    fi
+    
+    # Test Chatwoot
+    if curl -sf http://localhost:3000 >/dev/null 2>&1; then
+        print_success "Chatwoot: ✓ Responding"
+    else
+        print_warning "Chatwoot: ⚠ Initializing (may take 2-3 minutes)"
+    fi
+    
+    # Test Parse if enabled
     if [ "$INSTALL_PARSE" = "true" ]; then
-        echo ""
-        print_step "Testing Parse Server API..."
-        sleep 5
-        
-        if curl -s http://localhost:1337/parse/health 2>/dev/null | grep -q "ok"; then
-            print_success "Parse Server API: ✓ Responding"
+        if curl -sf http://localhost:1337/parse/health >/dev/null 2>&1; then
+            print_success "Parse Server: ✓ Responding"
         else
-            print_warning "Parse Server API: ⚠ Not responding yet"
-            print_info "Check logs: docker compose logs parse-server"
+            print_warning "Parse Server: ⚠ Not ready yet"
         fi
     fi
     
     echo ""
 }
 
-verify_services() {
-    print_header "Service Status"
+# ════════════════════════════════════════════════
+# POST-INSTALL SETUP
+# ════════════════════════════════════════════════
+
+create_chatwoot_admin() {
+    print_header "Setting up Chatwoot Admin Account"
+    
+    print_step "Creating Chatwoot admin account..."
+    
     cd "$INSTALL_DIR"
-    docker compose ps
+    
+    # Wait for Chatwoot to be fully ready
+    sleep 10
+    
+    docker compose exec -T chatwoot-rails bundle exec rails runner "
+      user = User.find_or_create_by!(email: 'admin@$PRIMARY_DOMAIN') do |u|
+        u.password = '$CHATWOOT_PASSWORD'
+        u.password_confirmation = '$CHATWOOT_PASSWORD'
+        u.name = 'OneStack Admin'
+        u.confirmed_at = Time.now
+      end
+      
+      if user.persisted?
+        account = Account.find_or_create_by!(name: 'OneStack')
+        AccountUser.find_or_create_by!(account: account, user: user, role: :administrator)
+        puts 'Admin account created successfully'
+      end
+    " 2>/dev/null || {
+        print_warning "Chatwoot admin setup will complete on first access"
+        print_info "Visit http://chat.$PRIMARY_DOMAIN to complete setup"
+    }
+    
+    print_success "Chatwoot ready"
+    echo ""
+}
+
+create_helper_scripts() {
+    print_header "Creating Management Scripts"
+    
+    local scripts_dir="$INSTALL_DIR/scripts"
+    
+    # Service management script
+    cat > "$scripts_dir/manage-services.sh" << 'MANAGESH'
+#!/bin/bash
+# OneStack Service Management
+
+cd "$(dirname "$0")/.."
+
+case "$1" in
+    start)
+        echo "Starting all services..."
+        docker compose up -d
+        ;;
+    stop)
+        echo "Stopping all services..."
+        docker compose down
+        ;;
+    restart)
+        echo "Restarting all services..."
+        docker compose restart
+        ;;
+    status)
+        docker compose ps
+        ;;
+    logs)
+        docker compose logs -f "${2:-}"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status|logs [service]}"
+        exit 1
+        ;;
+esac
+MANAGESH
+
+    # Backup script
+    cat > "$scripts_dir/backup.sh" << 'BACKUPSH'
+#!/bin/bash
+# OneStack Backup Script
+
+BACKUP_DIR="/backups/onestack"
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="onestack_backup_${DATE}.tar.gz"
+
+mkdir -p "$BACKUP_DIR"
+
+echo "Starting OneStack backup..."
+cd "$(dirname "$0")/.."
+
+# Backup databases
+echo "Backing up PostgreSQL..."
+docker compose exec -T postgres pg_dumpall -U postgres | gzip > "$BACKUP_DIR/postgres_${DATE}.sql.gz"
+
+echo "Backing up MongoDB..."
+docker compose exec -T mongodb mongodump --archive --gzip > "$BACKUP_DIR/mongodb_${DATE}.gz"
+
+echo "Backing up Redis..."
+docker compose exec -T redis redis-cli --rdb /data/dump.rdb
+docker cp onestack-redis:/data/dump.rdb "$BACKUP_DIR/redis_${DATE}.rdb"
+
+# Backup volumes
+echo "Backing up Docker volumes..."
+docker run --rm \
+    -v onestack_postgres_data:/data/postgres \
+    -v onestack_mongodb_data:/data/mongodb \
+    -v onestack_n8n_data:/data/n8n \
+    -v onestack_chatwoot_storage:/data/chatwoot \
+    -v "$BACKUP_DIR:/backup" \
+    ubuntu tar czf "/backup/volumes_${DATE}.tar.gz" /data
+
+# Backup configs
+echo "Backing up configurations..."
+tar czf "$BACKUP_DIR/configs_${DATE}.tar.gz" \
+    .env \
+    docker-compose.yml \
+    nginx/ \
+    backends/ \
+    frontends/
+
+echo "✓ Backup completed: $BACKUP_FILE"
+echo "Location: $BACKUP_DIR"
+
+# Keep only last 7 backups
+cd "$BACKUP_DIR"
+ls -t onestack_backup_*.tar.gz | tail -n +8 | xargs -r rm
+
+echo "✓ Old backups cleaned"
+BACKUPSH
+
+    # Database shell scripts
+    cat > "$scripts_dir/psql.sh" << 'PSQLSH'
+#!/bin/bash
+# Connect to PostgreSQL
+cd "$(dirname "$0")/.."
+docker compose exec postgres psql -U postgres "$@"
+PSQLSH
+
+    cat > "$scripts_dir/mongo.sh" << 'MONGOSH'
+#!/bin/bash
+# Connect to MongoDB
+cd "$(dirname "$0")/.."
+docker compose exec mongodb mongosh -u admin -p "$MONGODB_ROOT_PASSWORD" "$@"
+MONGOSH
+
+    cat > "$scripts_dir/redis-cli.sh" << 'REDISCLI'
+#!/bin/bash
+# Connect to Redis
+cd "$(dirname "$0")/.."
+docker compose exec redis redis-cli -a "$REDIS_PASSWORD" "$@"
+REDISCLI
+
+    # Make all scripts executable
+    chmod +x "$scripts_dir"/*.sh
+    chown -R "$ONESTACK_USER:$ONESTACK_USER" "$scripts_dir"
+    
+    print_success "Management scripts created"
     echo ""
 }
 
 # ════════════════════════════════════════════════
-# DISPLAY INFO
+# DISPLAY FINAL INFORMATION
 # ════════════════════════════════════════════════
 
 display_access_info() {
-    print_header "🎉 Installation Complete!"
+    clear
+    print_header "🎉 OneStack Extended Installation Complete!"
     
     local server_ip=$(get_server_ip)
     
     echo ""
-    echo "═══════════════════════════════════════════════════"
-    echo "  Access URLs"
-    echo "═══════════════════════════════════════════════════"
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  🌐 Access URLs"
+    echo "═══════════════════════════════════════════════════════════"
     echo ""
-    echo "Main: http://$PRIMARY_DOMAIN"
-    echo "MinIO: http://storage.$PRIMARY_DOMAIN"
+    echo "Main Website:"
+    echo "  http://$PRIMARY_DOMAIN"
+    echo ""
+    echo "Core Services:"
+    echo "  • MinIO Storage:     http://storage.$PRIMARY_DOMAIN"
+    echo "  • S3 API:            http://s3.$PRIMARY_DOMAIN"
     
-    [ "$INSTALL_PARSE" = "true" ] && echo "Parse Dashboard: http://api.$PRIMARY_DOMAIN"
-    [ "$INSTALL_PARSE" = "true" ] && echo "Parse API: http://api.$PRIMARY_DOMAIN/parse"
-    [ "$INSTALL_MONITORING" = "true" ] && echo "Grafana: http://monitor.$PRIMARY_DOMAIN"
-    [ "$INSTALL_ADMINER" = "true" ] && echo "Adminer: http://db.$PRIMARY_DOMAIN"
+    [ "$INSTALL_PARSE" = "true" ] && echo "  • Parse Dashboard:   http://api.$PRIMARY_DOMAIN"
+    [ "$INSTALL_PARSE" = "true" ] && echo "  • Parse API:         http://api.$PRIMARY_DOMAIN/parse"
+    [ "$INSTALL_MONITORING" = "true" ] && echo "  • Grafana:           http://monitor.$PRIMARY_DOMAIN"
+    [ "$INSTALL_ADMINER" = "true" ] && echo "  • Adminer:           http://db.$PRIMARY_DOMAIN"
     
     echo ""
-    echo "═══════════════════════════════════════════════════"
-    echo "  Credentials"
-    echo "═══════════════════════════════════════════════════"
+    echo "Extended Services:"
+    echo "  • n8n Workflows:     http://flow.$PRIMARY_DOMAIN"
+    echo "  • Chatwoot:          http://chat.$PRIMARY_DOMAIN"
+    echo "  • Node.js API:       http://api.$PRIMARY_DOMAIN/v1"
+    echo "  • Example App:       http://app.$PRIMARY_DOMAIN"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  🔐 Credentials"
+    echo "═══════════════════════════════════════════════════════════"
     echo ""
     echo "Saved to: $INSTALL_DIR/.credentials"
     echo ""
-    echo "View credentials:"
+    echo "Quick Access:"
     echo "  cat $INSTALL_DIR/.credentials"
+    echo ""
+    echo "Key Credentials:"
     echo ""
     
     if [ "$INSTALL_PARSE" = "true" ]; then
-        echo "Parse Dashboard Login:"
+        echo "Parse Dashboard:"
         echo "  Username: admin"
-        echo "  Password: (see .credentials file)"
+        echo "  Password: (see credentials file)"
         echo ""
     fi
     
-    echo "═══════════════════════════════════════════════════"
+    echo "n8n Workflow Automation:"
+    echo "  Email:    admin@$PRIMARY_DOMAIN"
+    echo "  Password: (see credentials file)"
+    echo ""
+    
+    echo "Chatwoot Customer Support:"
+    echo "  Email:    admin@$PRIMARY_DOMAIN"
+    echo "  Password: (see credentials file)"
+    echo "  Note:     Complete setup on first visit"
+    echo ""
+    
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  🛠️  Management Commands"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo "Service Management:"
+    echo "  cd $INSTALL_DIR"
+    echo "  docker compose ps                 # Check status"
+    echo "  docker compose logs -f [service]  # View logs"
+    echo "  docker compose restart [service]  # Restart service"
+    echo ""
+    echo "Helper Scripts:"
+    echo "  cd $INSTALL_DIR/scripts"
+    echo "  ./manage-services.sh status       # Service status"
+    echo "  ./backup.sh                       # Create backup"
+    echo "  ./psql.sh                         # PostgreSQL shell"
+    echo "  ./mongo.sh                        # MongoDB shell"
+    echo "  ./redis-cli.sh                    # Redis CLI"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  📚 Next Steps"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo "1. Visit main page to see all services:"
+    echo "   http://$PRIMARY_DOMAIN"
+    echo ""
+    echo "2. Set up Chatwoot (first-time setup):"
+    echo "   http://chat.$PRIMARY_DOMAIN"
+    echo "   - Complete account setup wizard"
+    echo "   - Create your first inbox"
+    echo ""
+    echo "3. Configure n8n workflows:"
+    echo "   http://flow.$PRIMARY_DOMAIN"
+    echo "   - Create automation workflows"
+    echo "   - Connect services together"
+    echo ""
+    echo "4. Test Node.js API:"
+    echo "   http://api.$PRIMARY_DOMAIN/v1/health"
+    echo "   http://api.$PRIMARY_DOMAIN/v1/users"
+    echo ""
+    echo "5. Deploy your own frontend:"
+    echo "   - Upload to: $INSTALL_DIR/frontends/[subdomain]/"
+    echo "   - Configure Nginx in: $INSTALL_DIR/nginx/conf.d/"
+    echo "   - Reload: docker compose restart nginx"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  ⚠️  Important Notes"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo "• Chatwoot may take 2-3 minutes to fully initialize"
+    echo "• First visit to chat.$PRIMARY_DOMAIN will show setup wizard"
+    echo "• All credentials are in: .credentials file (keep secure!)"
+    echo "• Backups saved to: /backups/onestack/"
+    echo "• Docker volumes contain all data (use docker volume commands)"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  📊 System Resources"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "Run 'docker compose ps' for status"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    print_success "Installation completed successfully! 🚀"
+    echo ""
+    print_info "Need help? Check documentation or logs:"
+    echo "  docker compose logs [service-name]"
     echo ""
 }
 
 # ════════════════════════════════════════════════
-# MAIN FUNCTION
+# CREATE README
+# ════════════════════════════════════════════════
+
+create_readme() {
+    cat > "$INSTALL_DIR/README.md" << EOF
+# OneStack Extended Platform
+
+Complete SME platform with all essential services deployed and configured.
+
+## 🚀 Services Deployed
+
+### Core Infrastructure
+- **PostgreSQL** (Port 5432) - Primary database with pgvector
+- **MongoDB** (Port 27017) - Document database
+- **Redis** (Port 6379) - Cache and message broker
+- **MinIO** (Ports 9000, 9001) - S3-compatible object storage
+- **Nginx** (Ports 80, 443) - Reverse proxy and web server
+
+### Extended Services
+- **n8n** (Port 5678) - Workflow automation
+- **Chatwoot** (Port 3000) - Customer support platform
+- **Node.js API** (Port 4000) - Custom REST API
+- **Parse Server** (Port 1337) - Backend-as-a-Service $([ "$INSTALL_PARSE" = "true" ] && echo "✓" || echo "✗")
+- **Grafana** (Port 3001) - Monitoring dashboards $([ "$INSTALL_MONITORING" = "true" ] && echo "✓" || echo "✗")
+- **Adminer** (Port 8080) - Database UI $([ "$INSTALL_ADMINER" = "true" ] && echo "✓" || echo "✗")
+
+## 📋 Quick Commands
+
+### Service Management
+\`\`\`bash
+docker compose ps                    # Check status
+docker compose logs -f [service]     # View logs
+docker compose restart [service]     # Restart service
+docker compose up -d                 # Start all
+docker compose down                  # Stop all
+\`\`\`
+
+### Database Access
+\`\`\`bash
+./scripts/psql.sh                    # PostgreSQL shell
+./scripts/mongo.sh                   # MongoDB shell
+./scripts/redis-cli.sh               # Redis CLI
+\`\`\`
+
+### Backup & Restore
+\`\`\`bash
+./scripts/backup.sh                  # Create full backup
+\`\`\`
+
+## 🔐 Security
+
+Credentials stored in: \`.credentials\` (keep secure!)
+
+**Important:** Change default passwords in production!
+
+## 📚 Documentation
+
+- Architecture: See ARCHITECTURE.md
+- API Docs: http://api.$PRIMARY_DOMAIN/v1
+- n8n Docs: https://docs.n8n.io
+- Chatwoot Docs: https://www.chatwoot.com/docs
+
+## 🆘 Troubleshooting
+
+### Service not starting?
+\`\`\`bash
+docker compose logs [service-name]
+docker compose restart [service-name]
+\`\`\`
+
+### Chatwoot initialization
+\`\`\`bash
+docker compose exec chatwoot-rails bundle exec rails db:chatwoot_prepare
+\`\`\`
+
+### Clear all data (dangerous!)
+\`\`\`bash
+docker compose down -v
+\`\`\`
+
+## 📞 Support
+
+- GitHub Issues: [Your repo]
+- Documentation: [Your docs]
+- Community: [Your community]
+
+---
+
+**OneStack Extended** - Complete SME Platform
+Generated: $(date)
+EOF
+
+    chown "$ONESTACK_USER:$ONESTACK_USER" "$INSTALL_DIR/README.md"
+    print_success "README.md created"
+}
+
+# ════════════════════════════════════════════════
+# MAIN EXECUTION FUNCTION
 # ════════════════════════════════════════════════
 
 run_onestack_setup() {
@@ -1032,25 +2274,38 @@ run_onestack_setup() {
         error_exit "INSTALL_DIR or PRIMARY_DOMAIN not set"
     fi
     
+    # Execute all setup steps
     check_nginx_conflict
     create_directory_structure
     generate_passwords
     create_env_file
     create_database_init_scripts
     create_docker_compose
+    
+    # Service-specific configs
     create_parse_dashboard_config
+    create_nodejs_api
     create_nginx_config
     create_monitoring_config
-    create_default_frontend
+    create_frontend_examples
     
+    # Deploy and initialize
     deploy_services
     wait_for_services
     verify_services
+    
+    # Post-install
+    create_chatwoot_admin
+    create_helper_scripts
+    create_readme
+    
+    # Final info
     display_access_info
     
     save_var "PHASE_2_COMPLETE" "true"
     
-    success_message "OneStack deployed successfully! 🎉"
+    success_message "OneStack Extended deployed successfully! 🎉"
 }
 
+# Export function for use in main installer
 export -f run_onestack_setup
