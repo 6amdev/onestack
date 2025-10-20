@@ -1,151 +1,109 @@
 #!/bin/bash
-# ═══════════════════════════════════════════════════
-# OneStack - Fix Parse Dashboard Task
-# ═══════════════════════════════════════════════════
+# fix-parse-dashboard-config.sh - แก้ไข Parse Dashboard Configuration
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh"
+echo "═══════════════════════════════════════════════════"
+echo "  Fix Parse Dashboard Configuration"
+echo "═══════════════════════════════════════════════════"
+
+cd /opt/onestack
 
 # ═══════════════════════════════════════════════════
-# Main Fix
+# สร้าง Parse Dashboard config file ที่ถูกต้อง
 # ═══════════════════════════════════════════════════
+echo "▶ Creating Parse Dashboard config.json..."
 
-main() {
-    print_header "Fix Parse Dashboard"
-    
-    print_info "This will attempt to fix the Parse Dashboard 502 error"
-    print_info "Known issue: Config file mount problem"
-    echo ""
-    
-    read -p "Continue? (Y/n): " confirm
-    [ "$confirm" = "n" ] && exit 0
-    
-    echo ""
-    
-    # Check current status
-    print_step "Checking current status..."
-    
-    cd /opt/onestack
-    docker compose ps parse-dashboard
-    
-    echo ""
-    
-    # Check config file
-    print_step "Checking config file..."
-    
-    if [ -f "/opt/onestack/parse-dashboard/config.json" ]; then
-        print_success "Config file exists"
-        echo ""
-        cat /opt/onestack/parse-dashboard/config.json
-    else
-        print_warning "Config file not found, will create..."
-        
-        mkdir -p /opt/onestack/parse-dashboard
-        
-        # Get credentials from .env
-        local APP_ID=$(grep "^PARSE_APP_ID=" /opt/onestack/.env | cut -d= -f2)
-        local MASTER_KEY=$(grep "^PARSE_MASTER_KEY=" /opt/onestack/.env | cut -d= -f2)
-        local DOMAIN=$(grep "^DOMAIN=" /opt/onestack/.env | cut -d= -f2)
-        
-        # Determine protocol
-        if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-            local PROTOCOL="https"
-        else
-            local PROTOCOL="http"
-        fi
-        
-        # Create config
-        cat > /opt/onestack/parse-dashboard/config.json << EOF
+mkdir -p parse-dashboard
+
+cat > parse-dashboard/config.json << 'EOF'
 {
   "apps": [
     {
-      "serverURL": "$PROTOCOL://api.$DOMAIN/parse",
-      "appId": "$APP_ID",
-      "masterKey": "$MASTER_KEY",
+      "serverURL": "http://parse-server:1337/parse",
+      "appId": "onestack_app_id",
+      "masterKey": "onestack_master_key_12345",
       "appName": "OneStack"
     }
   ],
   "users": [
     {
       "user": "admin",
-      "pass": "$MASTER_KEY"
+      "pass": "onestack123"
     }
   ],
-  "iconsFolder": "icons"
+  "trustProxy": 1,
+  "allowInsecureHTTP": true
 }
 EOF
-        
-        print_success "Config file created"
-    fi
-    
-    echo ""
-    
-    # Fix docker-compose volume mount
-    print_step "Checking docker-compose.yml..."
-    
-    if grep -q "parse-dashboard/config.json" /opt/onestack/docker-compose.yml; then
-        print_success "Volume mount is configured"
-    else
-        print_warning "Volume mount not found in docker-compose.yml"
-        print_info "Please ensure parse-dashboard service has:"
-        print_info "  volumes:"
-        print_info "    - ./parse-dashboard/config.json:/src/Parse-Dashboard/parse-dashboard-config.json"
-        echo ""
-        read -p "Would you like to edit docker-compose.yml now? (y/N): " edit
-        
-        if [ "$edit" = "y" ]; then
-            nano /opt/onestack/docker-compose.yml
-        fi
-    fi
-    
-    echo ""
-    
-    # Restart Parse Dashboard
-    print_step "Restarting Parse Dashboard..."
-    
-    docker compose stop parse-dashboard
-    docker compose rm -f parse-dashboard
-    docker compose up -d parse-dashboard
-    
-    # Wait and check
-    print_info "Waiting for service to start..."
-    sleep 5
-    
-    echo ""
-    docker compose ps parse-dashboard
-    
-    echo ""
-    
-    # Test access
-    print_step "Testing access..."
-    
-    local DOMAIN=$(grep "^DOMAIN=" /opt/onestack/.env | cut -d= -f2)
-    
-    if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-        local URL="https://api.$DOMAIN"
-    else
-        local URL="http://api.$DOMAIN"
-    fi
-    
-    echo ""
-    print_info "Testing: $URL"
-    
-    local STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL" 2>&1)
-    
-    if [[ "$STATUS" =~ ^[23] ]]; then
-        echo ""
-        print_success "Parse Dashboard is now accessible!"
-        print_info "URL: $URL"
-        print_info "Username: admin"
-        print_info "Password: (check .credentials file)"
-    else
-        echo ""
-        print_error "Still getting $STATUS error"
-        print_info "Check logs:"
-        print_info "  docker compose logs parse-dashboard"
-    fi
-}
 
-# Run
-check_root
-main
+echo "✓ Config file created"
+
+# ═══════════════════════════════════════════════════
+# อัพเดท docker-compose.yml ให้ mount config file
+# ═══════════════════════════════════════════════════
+echo ""
+echo "▶ Checking docker-compose.yml..."
+
+# ตรวจสอบว่ามี volume mount สำหรับ config.json หรือยัง
+if grep -q "parse-dashboard/config.json" docker-compose.yml; then
+    echo "✓ Config volume already exists"
+else
+    echo "⚠ Need to add config volume to docker-compose.yml"
+    echo ""
+    echo "Please add this to parse-dashboard service volumes:"
+    echo "  - ./parse-dashboard/config.json:/parse-dashboard/config.json:ro"
+fi
+
+# ═══════════════════════════════════════════════════
+# Restart Parse Dashboard
+# ═══════════════════════════════════════════════════
+echo ""
+echo "▶ Restarting Parse Dashboard..."
+
+docker compose stop parse-dashboard
+docker compose rm -f parse-dashboard
+docker compose up -d parse-dashboard
+
+echo ""
+echo "⏳ Waiting 10 seconds..."
+sleep 10
+
+# ═══════════════════════════════════════════════════
+# Check status
+# ═══════════════════════════════════════════════════
+echo ""
+echo "▶ Checking Parse Dashboard status..."
+echo ""
+
+docker compose ps parse-dashboard
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Recent logs:"
+docker compose logs --tail=30 parse-dashboard
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# ═══════════════════════════════════════════════════
+# Test access
+# ═══════════════════════════════════════════════════
+echo ""
+echo "▶ Testing access..."
+echo ""
+
+sleep 5
+
+STATUS=$(docker compose ps parse-dashboard --format json | jq -r '.[0].State' 2>/dev/null || echo "unknown")
+
+if [ "$STATUS" = "running" ]; then
+    echo "✅ Parse Dashboard is running!"
+    echo ""
+    echo "Access URLs:"
+    echo "  • Internal: http://parse-dashboard:4040"
+    echo "  • External: http://api.sixamdev.com (via Nginx)"
+    echo ""
+    echo "Login credentials:"
+    echo "  • Username: admin"
+    echo "  • Password: onestack123"
+else
+    echo "❌ Parse Dashboard is NOT running"
+    echo "Status: $STATUS"
+fi
