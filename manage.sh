@@ -187,32 +187,30 @@ Management Tasks:
   7) Create backup
   8) System health check
   9) View system status
+  10) 🧪 Test all services (comprehensive)
+  11) ✅ Validate installation
 
 🛠️ Troubleshooting:
-  10) Fix Parse Dashboard
-  11) Reset service
-  12) Clean up resources
+  12) Fix Parse Dashboard
+  13) Reset service
+  14) Clean up resources
 
 📚 Information:
-  13) Show credentials
-  14) Show URLs
-  15) Check for updates
+  15) Show credentials
+  16) Show URLs
+  17) Check for updates
 
 🚪 Other:
-  16) Restart all services
-  17) Stop all services
-  18) Exit
+  18) Restart all services
+  19) Stop all services
+  20) Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
     
-    read -p "Enter choice [1-18]: " choice
+    read -p "Enter choice [1-20]: " choice
     handle_menu_choice "$choice"
 }
-
-# ═══════════════════════════════════════════════════
-# Menu Handler
-# ═══════════════════════════════════════════════════
 
 handle_menu_choice() {
     case $1 in
@@ -230,21 +228,23 @@ handle_menu_choice() {
         7)  run_task "backup-create" ;;
         8)  run_task "health-check" ;;
         9)  run_task "system-status" ;;
+        10) run_task "test-services" ;;
+        11) run_task "validate-install" ;;  # NEW!
         
         # Troubleshooting
-        10) run_task "fix-parse-dashboard" ;;
-        11) run_task "service-reset" ;;
-        12) run_task "cleanup" ;;
+        12) run_task "fix-parse-dashboard" ;;
+        13) run_task "service-reset" ;;
+        14) run_task "cleanup" ;;
         
-        # Information (built-in, no task file needed)
-        13) show_credentials ;;
-        14) show_urls ;;
-        15) check_updates ;;
+        # Information
+        15) show_credentials ;;
+        16) show_urls ;;
+        17) check_updates ;;
         
-        # Other (built-in, no task file needed)
-        16) restart_all_services ;;
-        17) stop_all_services ;;
-        18) exit 0 ;;
+        # Other
+        18) restart_all_services ;;
+        19) stop_all_services ;;
+        20) exit 0 ;;
         
         *)  
             print_error "Invalid choice"
