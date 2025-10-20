@@ -95,27 +95,75 @@ EOF
 # Menu Handler
 # ═══════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════
+# Task Runner Helper
+# ═══════════════════════════════════════════════════
+
+run_task() {
+    local task_name=$1
+    local task_file="$SCRIPT_DIR/tasks/${task_name}.sh"
+    
+    if [ -f "$task_file" ]; then
+        bash "$task_file"
+    else
+        print_error "Task not available: ${task_name}"
+        print_info "File not found: $task_file"
+        echo ""
+        print_warning "This feature requires task scripts to be installed"
+        print_info "Please upload task scripts to: $SCRIPT_DIR/tasks/"
+        
+        # Show what's available
+        if [ -d "$SCRIPT_DIR/tasks" ]; then
+            local available=$(ls -1 "$SCRIPT_DIR/tasks/"*.sh 2>/dev/null | wc -l)
+            if [ "$available" -gt 0 ]; then
+                echo ""
+                print_info "Available tasks:"
+                ls -1 "$SCRIPT_DIR/tasks/"*.sh 2>/dev/null | xargs -n1 basename
+            fi
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════
+# Menu Handler
+# ═══════════════════════════════════════════════════
+
 handle_menu_choice() {
     case $1 in
-        1)  bash "$SCRIPT_DIR/tasks/ssl-setup.sh" ;;
-        2)  bash "$SCRIPT_DIR/tasks/ssl-renew.sh" ;;
-        3)  bash "$SCRIPT_DIR/tasks/ssl-status.sh" ;;
-        4)  bash "$SCRIPT_DIR/tasks/service-restart.sh" ;;
-        5)  bash "$SCRIPT_DIR/tasks/service-logs.sh" ;;
-        6)  bash "$SCRIPT_DIR/tasks/health-check.sh" ;;
-        7)  bash "$SCRIPT_DIR/tasks/backup-create.sh" ;;
-        8)  bash "$SCRIPT_DIR/tasks/health-check.sh" ;;
-        9)  bash "$SCRIPT_DIR/tasks/system-status.sh" ;;
-        10) bash "$SCRIPT_DIR/tasks/fix-parse-dashboard.sh" ;;
-        11) bash "$SCRIPT_DIR/tasks/service-reset.sh" ;;
-        12) bash "$SCRIPT_DIR/tasks/cleanup.sh" ;;
+        # SSL Management
+        1)  run_task "ssl-setup" ;;
+        2)  run_task "ssl-renew" ;;
+        3)  run_task "ssl-status" ;;
+        
+        # Service Management
+        4)  run_task "service-restart" ;;
+        5)  run_task "service-logs" ;;
+        6)  run_task "health-check" ;;
+        
+        # System Maintenance
+        7)  run_task "backup-create" ;;
+        8)  run_task "health-check" ;;
+        9)  run_task "system-status" ;;
+        
+        # Troubleshooting
+        10) run_task "fix-parse-dashboard" ;;
+        11) run_task "service-reset" ;;
+        12) run_task "cleanup" ;;
+        
+        # Information (these work without task files)
         13) show_credentials ;;
         14) show_urls ;;
         15) check_updates ;;
+        
+        # Other (these work without task files)
         16) restart_all_services ;;
         17) stop_all_services ;;
         18) exit 0 ;;
-        *)  print_error "Invalid choice" && sleep 2 ;;
+        
+        *)  
+            print_error "Invalid choice"
+            sleep 2
+            ;;
     esac
     
     echo ""

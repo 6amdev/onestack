@@ -365,7 +365,7 @@ create_docker_compose() {
     print_step "Generating docker-compose.yml..."
     
     cat > "$compose_file" << 'EOF'
-version: '3.8'
+#version: '3.8'
 
 # ═══════════════════════════════════════════════════
 # NETWORKS
