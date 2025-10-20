@@ -193,8 +193,17 @@ main() {
     # DNS Check
     print_step "Checking DNS configuration..."
     
-    # Get DNS IP - use simple dig first
-    local DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+    # Get DNS IP - use temp file to avoid subshell issues
+    dig +short "$DOMAIN" > /tmp/onestack_dns_check 2>&1
+    local DNS_IP=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' /tmp/onestack_dns_check | head -1)
+    rm -f /tmp/onestack_dns_check
+    
+    # Debug output
+    if [ -z "$DNS_IP" ]; then
+        print_warning "dig command output:"
+        dig +short "$DOMAIN" 2>&1 | head -5
+        echo ""
+    fi
     
     # Get Server IP - force IPv4
     local SERVER_IP=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null)
@@ -216,8 +225,13 @@ main() {
     
     # Validation
     if [ -z "$DNS_IP" ]; then
-        print_error "Could not resolve domain"
-        print_info "Check DNS configuration at your domain registrar"
+        print_error "Could not resolve domain via dig"
+        echo ""
+        print_info "Manual test:"
+        echo "  Run: dig +short $DOMAIN"
+        echo ""
+        print_info "If manual test works but script doesn't,"
+        print_info "you can continue anyway - Let's Encrypt uses its own DNS resolver"
         echo ""
         read -p "Continue anyway? (y/N): " force
         [ "$force" != "y" ] && exit 1
