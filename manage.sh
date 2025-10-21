@@ -1,446 +1,404 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# OneStack Management Console v2.3
+# OneStack Manager
+# Manage your OneStack installation
 # ═══════════════════════════════════════════════════
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh"
+INSTALL_DIR="/opt/onestack"
 
-# ═══════════════════════════════════════════════════
-# Prerequisites Check
-# ═══════════════════════════════════════════════════
+# โหลด utilities
+if [ -f "$SCRIPT_DIR/lib/utils.sh" ]; then
+    source "$SCRIPT_DIR/lib/utils.sh"
+else
+    echo "Error: utils.sh not found"
+    exit 1
+fi
 
-check_prerequisites() {
-    local missing=0
-    
-    # Check yq
-    if ! command -v yq &> /dev/null; then
-        print_warning "yq not installed (needed for SSL setup)"
-        read -p "Install yq now? (Y/n): " install_yq
-        
-        if [ "$install_yq" != "n" ]; then
-            print_step "Installing yq..."
-            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-            chmod +x /usr/bin/yq
-            
-            if command -v yq &> /dev/null; then
-                print_success "yq installed successfully"
-            else
-                print_error "Failed to install yq"
-                missing=1
-            fi
-        else
-            print_warning "Some features may not work without yq"
-            missing=1
-        fi
-    fi
-    
-    # Check tasks directory
-    if [ ! -d "$SCRIPT_DIR/tasks" ]; then
-        print_warning "Tasks directory not found"
-        mkdir -p "$SCRIPT_DIR/tasks"
-        print_info "Created: $SCRIPT_DIR/tasks"
-        print_warning "Please upload task scripts"
-        missing=1
-    else
-        local task_count=$(find "$SCRIPT_DIR/tasks" -name "*.sh" -type f 2>/dev/null | wc -l)
-        if [ "$task_count" -eq 0 ]; then
-            print_warning "No task scripts found (0 tasks)"
-            print_info "Some menu options will not work"
-            missing=1
-        fi
-    fi
-    
-    # Check lib/06-ssl.sh
-    if [ ! -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
-        print_warning "lib/06-ssl.sh not found (SSL features unavailable)"
-        missing=1
-    fi
-    
-    if [ "$missing" -eq 1 ]; then
-        echo ""
-        read -p "Continue anyway? (Y/n): " cont
-        [ "$cont" = "n" ] && exit 0
-    fi
-}
+# โหลด SSL functions
+if [ -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
+    source "$SCRIPT_DIR/lib/06-ssl.sh"
+fi
 
 # ═══════════════════════════════════════════════════
 # Check Installation
 # ═══════════════════════════════════════════════════
 
 check_installation() {
-    if [ ! -d "/opt/onestack" ]; then
-        print_error "OneStack is not installed"
-        print_info "Please run install.sh first"
+    if [ ! -d "$INSTALL_DIR" ]; then
+        print_error "OneStack not installed"
+        print_info "Please run: sudo bash install.sh"
         exit 1
     fi
     
-    if [ ! -f "/opt/onestack/docker-compose.yml" ]; then
-        print_error "OneStack docker-compose.yml not found"
+    if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
+        print_error "docker-compose.yml not found"
         exit 1
     fi
 }
 
 # ═══════════════════════════════════════════════════
-# Task Runner
+# Show Status
 # ═══════════════════════════════════════════════════
 
-run_task() {
-    local task_name=$1
-    local task_file="$SCRIPT_DIR/tasks/${task_name}.sh"
-    
+show_status() {
     clear
+    print_header "OneStack Status"
     
-    if [ -f "$task_file" ]; then
-        if [ ! -x "$task_file" ]; then
-            chmod +x "$task_file"
-        fi
-        
-        bash "$task_file"
-        local exit_code=$?
-        
-        if [ $exit_code -ne 0 ]; then
-            echo ""
-            print_error "Task exited with error code: $exit_code"
-        fi
-        
-        return $exit_code
-    else
-        print_error "Task not available: ${task_name}"
+    cd "$INSTALL_DIR"
+    
+    # โหลด config
+    if [ -f ".env" ]; then
+        source .env
         echo ""
-        print_info "File not found: $task_file"
+        print_info "Domain: ${DOMAIN:-Not configured}"
+        print_info "Install Directory: $INSTALL_DIR"
         echo ""
-        print_warning "This feature requires task scripts"
-        echo ""
-        print_info "Available tasks:"
-        
-        if [ -d "$SCRIPT_DIR/tasks" ]; then
-            local available=$(find "$SCRIPT_DIR/tasks" -name "*.sh" -type f 2>/dev/null)
-            if [ -n "$available" ]; then
-                echo "$available" | while read file; do
-                    echo "  ✓ $(basename "$file" .sh)"
-                done
-            else
-                echo "  (none - please upload task scripts)"
-            fi
-        else
-            echo "  (tasks directory not found)"
-        fi
-        
-        echo ""
-        print_info "Upload location: $SCRIPT_DIR/tasks/"
-        return 1
     fi
+    
+    # แสดง services
+    print_step "Running Services:"
+    echo ""
+    docker compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    echo ""
+    
+    # แสดง SSL status
+    if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+        print_success "SSL: Enabled"
+        
+        # ตรวจสอบวันหมดอายุ
+        if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+            local expiry=$(openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2)
+            local expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null)
+            local now_epoch=$(date +%s)
+            local days_left=$(( ($expiry_epoch - $now_epoch) / 86400 ))
+            
+            print_info "SSL expires in: $days_left days"
+        fi
+    else
+        print_warning "SSL: Not configured"
+    fi
+    
+    echo ""
+    print_info "Press any key to return to menu..."
+    read -n 1 -s
 }
 
 # ═══════════════════════════════════════════════════
-# Service Status
+# Setup SSL
 # ═══════════════════════════════════════════════════
 
-show_service_status() {
-    if [ -d "/opt/onestack" ] && [ -f "/opt/onestack/docker-compose.yml" ]; then
-        cd /opt/onestack
-        
+setup_ssl_menu() {
+    clear
+    print_header "SSL Certificate Setup"
+    
+    cd "$INSTALL_DIR"
+    
+    # โหลด domain
+    if [ -f ".env" ]; then
+        source .env
+    fi
+    
+    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "localhost" ]; then
+        print_error "Domain not configured"
         echo ""
-        print_info "Service Status:"
-        docker compose ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | head -12 || \
-            echo "  (Unable to get service status)"
+        print_info "Please set DOMAIN in $INSTALL_DIR/.env"
+        echo ""
+        print_info "Example:"
+        echo "  DOMAIN=example.com"
+        echo "  SSL_EMAIL=admin@example.com"
+        echo "  SSL_MODE=production"
+        echo ""
+        read -p "Press Enter to return to menu..."
+        return
+    fi
+    
+    echo ""
+    print_info "Current Configuration:"
+    echo "  Domain: $DOMAIN"
+    echo "  Email: ${SSL_EMAIL:-admin@$DOMAIN}"
+    echo "  Mode: ${SSL_MODE:-production}"
+    echo ""
+    
+    # ตรวจสอบ SSL status
+    if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+        print_warning "SSL certificates already exist"
+        echo ""
+        echo "Options:"
+        echo "  1) Renew certificates"
+        echo "  2) Re-scan services and update"
+        echo "  3) Return to menu"
+        echo ""
+        read -p "Choose option [1-3]: " ssl_option
+        
+        case $ssl_option in
+            1)
+                print_step "Renewing certificates..."
+                certbot renew --force-renewal
+                docker compose exec -T nginx nginx -s reload
+                print_success "Certificates renewed!"
+                ;;
+            2)
+                setup_ssl_smart "$INSTALL_DIR" "$INSTALL_DIR/.env"
+                ;;
+            *)
+                return
+                ;;
+        esac
+    else
+        # ติดตั้งใหม่
+        echo ""
+        print_info "This will:"
+        echo "  1. Scan all installed services"
+        echo "  2. Discover all domains/subdomains"
+        echo "  3. Request SSL certificates"
+        echo "  4. Configure HTTPS for all services"
+        echo "  5. Setup auto-renewal"
+        echo ""
+        
+        if confirm "Start SSL setup?"; then
+            setup_ssl_smart "$INSTALL_DIR" "$INSTALL_DIR/.env"
+        fi
+    fi
+    
+    echo ""
+    read -p "Press Enter to return to menu..."
+}
+
+# ═══════════════════════════════════════════════════
+# Add Service
+# ═══════════════════════════════════════════════════
+
+add_service_menu() {
+    clear
+    print_header "Add Service"
+    
+    echo "Available Services:"
+    echo ""
+    echo "  1) n8n (Workflow Automation)"
+    echo "  2) Chatwoot (Customer Support)"
+    echo "  3) Parse Server (Backend-as-a-Service)"
+    echo "  4) Monitoring (Grafana + Prometheus)"
+    echo "  5) Adminer (Database UI)"
+    echo "  6) Return to menu"
+    echo ""
+    read -p "Choose service to add [1-6]: " service_choice
+    
+    case $service_choice in
+        1)
+            print_info "Adding n8n..."
+            # TODO: เพิ่ม logic การติดตั้ง n8n
+            print_warning "Not implemented yet"
+            ;;
+        2)
+            print_info "Adding Chatwoot..."
+            # TODO: เพิ่ม logic การติดตั้ง Chatwoot
+            print_warning "Not implemented yet"
+            ;;
+        *)
+            print_info "Invalid choice"
+            ;;
+    esac
+    
+    echo ""
+    read -p "Press Enter to return to menu..."
+}
+
+# ═══════════════════════════════════════════════════
+# Service Control
+# ═══════════════════════════════════════════════════
+
+service_control_menu() {
+    clear
+    print_header "Service Control"
+    
+    cd "$INSTALL_DIR"
+    
+    echo "Actions:"
+    echo ""
+    echo "  1) Start all services"
+    echo "  2) Stop all services"
+    echo "  3) Restart all services"
+    echo "  4) View logs"
+    echo "  5) Return to menu"
+    echo ""
+    read -p "Choose action [1-5]: " action_choice
+    
+    case $action_choice in
+        1)
+            print_step "Starting all services..."
+            docker compose up -d
+            print_success "Services started"
+            ;;
+        2)
+            print_step "Stopping all services..."
+            docker compose down
+            print_success "Services stopped"
+            ;;
+        3)
+            print_step "Restarting all services..."
+            docker compose restart
+            print_success "Services restarted"
+            ;;
+        4)
+            echo ""
+            echo "Which service logs?"
+            docker compose ps --services
+            echo ""
+            read -p "Service name (or 'all'): " service_name
+            
+            if [ "$service_name" = "all" ]; then
+                docker compose logs -f --tail=50
+            else
+                docker compose logs -f --tail=50 "$service_name"
+            fi
+            ;;
+        5)
+            return
+            ;;
+    esac
+    
+    echo ""
+    read -p "Press Enter to return to menu..."
+}
+
+# ═══════════════════════════════════════════════════
+# Backup System
+# ═══════════════════════════════════════════════════
+
+backup_menu() {
+    clear
+    print_header "Backup System"
+    
+    echo "Backup Options:"
+    echo ""
+    echo "  1) Create full backup"
+    echo "  2) Create database backup only"
+    echo "  3) List backups"
+    echo "  4) Restore from backup"
+    echo "  5) Return to menu"
+    echo ""
+    read -p "Choose option [1-5]: " backup_choice
+    
+    case $backup_choice in
+        1)
+            print_step "Creating full backup..."
+            # TODO: เพิ่ม backup logic
+            print_warning "Not implemented yet"
+            ;;
+        *)
+            print_info "Invalid choice"
+            ;;
+    esac
+    
+    echo ""
+    read -p "Press Enter to return to menu..."
+}
+
+# ═══════════════════════════════════════════════════
+# System Info
+# ═══════════════════════════════════════════════════
+
+show_system_info() {
+    clear
+    print_header "System Information"
+    
+    echo ""
+    print_step "Server Info"
+    echo "  OS: $(lsb_release -d | cut -f2)"
+    echo "  Kernel: $(uname -r)"
+    echo "  Uptime: $(uptime -p)"
+    echo ""
+    
+    print_step "Resources"
+    echo "  CPU: $(nproc) cores"
+    echo "  RAM: $(free -h | awk '/^Mem:/ {print $2}') total, $(free -h | awk '/^Mem:/ {print $3}') used"
+    echo "  Disk: $(df -h /opt/onestack 2>/dev/null | tail -1 | awk '{print $2}') total, $(df -h /opt/onestack 2>/dev/null | tail -1 | awk '{print $3}') used ($(df -h /opt/onestack 2>/dev/null | tail -1 | awk '{print $5}'))"
+    echo ""
+    
+    print_step "Docker Info"
+    echo "  Version: $(docker --version | cut -d' ' -f3 | tr -d ',')"
+    echo "  Compose: $(docker compose version --short 2>/dev/null || echo 'N/A')"
+    echo "  Containers: $(docker ps -q | wc -l) running, $(docker ps -aq | wc -l) total"
+    echo "  Images: $(docker images -q | wc -l)"
+    echo ""
+    
+    cd "$INSTALL_DIR" 2>/dev/null
+    if [ -f ".env" ]; then
+        source .env
+        print_step "OneStack Info"
+        echo "  Domain: ${DOMAIN:-Not set}"
+        echo "  Install Directory: $INSTALL_DIR"
+        echo "  Version: $(grep "^VERSION=" .env 2>/dev/null | cut -d= -f2 || echo 'Unknown')"
         echo ""
     fi
+    
+    read -p "Press Enter to return to menu..."
 }
 
 # ═══════════════════════════════════════════════════
 # Main Menu
 # ═══════════════════════════════════════════════════
 
-show_main_menu() {
+show_menu() {
     clear
-    cat << 'EOF'
-╔═══════════════════════════════════════════════════════════════╗
-║           OneStack Management Console v2.3                    ║
-╠═══════════════════════════════════════════════════════════════╣
-EOF
+    echo ""
+    echo "╔════════════════════════════════════════════════╗"
+    echo "║                                                ║"
+    echo "║           OneStack Manager v1.0                ║"
+    echo "║                                                ║"
+    echo "╚════════════════════════════════════════════════╝"
+    echo ""
+    echo "  1) Show Status"
+    echo "  2) Setup/Manage SSL Certificates"
+    echo "  3) Add Service"
+    echo "  4) Service Control"
+    echo "  5) Backup System"
+    echo "  6) System Information"
+    echo "  7) Exit"
+    echo ""
+    read -p "Choose option [1-7]: " choice
     
-    show_service_status
-    
-    cat << 'EOF'
-Management Tasks:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔐 SSL Management:
-  1) Setup SSL (first time)
-  2) Renew SSL certificates
-  3) Check SSL status
-
-🚀 Install Additional Services:
-  4) Setup Node.js API Template
-  5) Setup Python FastAPI Template
-  6) Setup Python RAG System (AI)
-  7) Setup Ollama (Local LLM)
-  8) Setup ChromaDB (Vector DB)
-  9) Setup n8n (Automation)
-  10) Setup Chatwoot (Support)
-  11) Setup Backup System
-
-🔧 Service Management:
-  12) Restart service
-  13) View service logs
-  14) Check service health
-  15) 🧪 Test all services
-  16) ✅ Validate installation
-
-💾 System Maintenance:
-  17) Create backup
-  18) System health check
-  19) View system status
-
-🛠️ Troubleshooting:
-  20) Fix Parse Dashboard
-  21) Reset service
-  22) Clean up resources
-  23) 🔧 Quick Fix (auto-repair)
-  24) 📝 Fix .env configuration
-
-📚 Information:
-  25) Show credentials
-  26) Show URLs
-  27) Check for updates
-
-🚪 Other:
-  28) Restart all services
-  29) Stop all services
-  30) Exit
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
-    
-    read -p "Enter choice [1-30]: " choice
-    handle_menu_choice "$choice"
-}
-
-# ═══════════════════════════════════════════════════
-# Menu Handler
-# ═══════════════════════════════════════════════════
-
-handle_menu_choice() {
-    case $1 in
-        # SSL Management
-        1)  run_task "ssl-setup" ;;
-        2)  run_task "ssl-renew" ;;
-        3)  run_task "ssl-status" ;;
-        
-        # Install Additional Services
-        4)  run_task "setup-nodejs-api" ;;
-        5)  run_task "setup-python-api" ;;
-        6)  run_task "setup-python-rag" ;;
-        7)  run_task "setup-ollama" ;;
-        8)  run_task "setup-chromadb" ;;
-        9)  run_task "setup-n8n" ;;
-        10) run_task "setup-chatwoot" ;;
-        11) run_task "setup-backup" ;;
-        
-        # Service Management
-        12) run_task "service-restart" ;;
-        13) run_task "service-logs" ;;
-        14) run_task "health-check" ;;
-        15) run_task "test-services" ;;
-        16) run_task "validate-install" ;;
-        
-        # System Maintenance
-        17) run_task "backup-create" ;;
-        18) run_task "health-check" ;;
-        19) run_task "system-status" ;;
-        
-        # Troubleshooting
-        20) run_task "fix-parse-dashboard" ;;
-        21) run_task "service-reset" ;;
-        22) run_task "cleanup" ;;
-        23) run_task "quick-fix" ;;
-        24) run_task "fix-env" ;;
-        
-        # Information
-        25) show_credentials ;;
-        26) show_urls ;;
-        27) check_updates ;;
-        
-        # Other
-        28) restart_all_services ;;
-        29) stop_all_services ;;
-        30) exit 0 ;;
-        
-        *)  
-            print_error "Invalid choice"
-            sleep 2
+    case $choice in
+        1) show_status ;;
+        2) setup_ssl_menu ;;
+        3) add_service_menu ;;
+        4) service_control_menu ;;
+        5) backup_menu ;;
+        6) show_system_info ;;
+        7) 
+            clear
+            print_success "Goodbye!"
+            exit 0
+            ;;
+        *)
+            print_error "Invalid option"
+            sleep 1
             ;;
     esac
-    
-    echo ""
-    read -p "Press Enter to continue..."
-    show_main_menu
 }
 
 # ═══════════════════════════════════════════════════
-# Built-in Functions
-# ═══════════════════════════════════════════════════
-
-show_credentials() {
-    clear
-    print_header "OneStack Credentials"
-    
-    if [ -f "/opt/onestack/.credentials" ]; then
-        cat /opt/onestack/.credentials
-    else
-        print_error "Credentials file not found"
-        print_info "Expected: /opt/onestack/.credentials"
-    fi
-    
-    echo ""
-    print_info "Environment variables: /opt/onestack/.env"
-}
-
-show_urls() {
-    clear
-    print_header "OneStack Service URLs"
-    
-    local DOMAIN=$(grep "^DOMAIN=" /opt/onestack/.env 2>/dev/null | cut -d= -f2)
-    
-    if [ -z "$DOMAIN" ]; then
-        DOMAIN="localhost"
-        print_warning "Domain not found in .env, using default"
-    fi
-    
-    if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-        local PROTOCOL="https"
-        print_success "SSL is configured ✅"
-    else
-        local PROTOCOL="http"
-        print_warning "SSL not configured (HTTP only)"
-    fi
-    
-    echo ""
-    echo "Service URLs:"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  Main Site:       $PROTOCOL://$DOMAIN"
-    echo "  MinIO Console:   $PROTOCOL://storage.$DOMAIN"
-    echo "  MinIO S3 API:    $PROTOCOL://s3.$DOMAIN"
-    
-    # Check which services are installed
-    if docker ps | grep -q "nodejs-api"; then
-        echo "  Node.js API:     $PROTOCOL://api.$DOMAIN/v1"
-    fi
-    
-    if docker ps | grep -q "python-api"; then
-        echo "  Python API:      $PROTOCOL://api.$DOMAIN/v2"
-    fi
-    
-    if docker ps | grep -q "python-rag"; then
-        echo "  RAG API:         $PROTOCOL://ai.$DOMAIN"
-    fi
-    
-    if docker ps | grep -q "parse-server"; then
-        echo "  Parse Server:    $PROTOCOL://api.$DOMAIN/parse"
-        echo "  Parse Dashboard: $PROTOCOL://api.$DOMAIN"
-    fi
-    
-    if docker ps | grep -q "grafana"; then
-        echo "  Grafana:         $PROTOCOL://monitor.$DOMAIN"
-    fi
-    
-    if docker ps | grep -q "prometheus"; then
-        echo "  Prometheus:      $PROTOCOL://prometheus.$DOMAIN"
-    fi
-    
-    if docker ps | grep -q "adminer"; then
-        echo "  Adminer:         $PROTOCOL://db.$DOMAIN"
-    fi
-    
-    if docker ps | grep -q "n8n"; then
-        echo "  n8n:             $PROTOCOL://flow.$DOMAIN"
-    fi
-    
-    if docker ps | grep -q "chatwoot"; then
-        echo "  Chatwoot:        $PROTOCOL://chat.$DOMAIN"
-    fi
-    
-    echo ""
-    
-    print_info "Testing accessibility..."
-    for url in "$PROTOCOL://$DOMAIN" "$PROTOCOL://storage.$DOMAIN"; do
-        local status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>&1)
-        if [[ "$status" =~ ^[23] ]]; then
-            echo "  ✅ $url"
-        else
-            echo "  ❌ $url (HTTP $status)"
-        fi
-    done
-}
-
-check_updates() {
-    clear
-    print_header "Check for Updates"
-    
-    print_info "Current OneStack version: 2.3.0"
-    print_info "Checking for updates..."
-    
-    print_warning "Update check not implemented yet"
-    print_info "Check manually: https://github.com/yourusername/onestack"
-}
-
-restart_all_services() {
-    clear
-    print_header "Restart All Services"
-    
-    read -p "This will restart all OneStack services. Continue? (y/N): " confirm
-    
-    if [ "$confirm" = "y" ]; then
-        print_step "Restarting all services..."
-        cd /opt/onestack
-        
-        if docker compose restart 2>/dev/null; then
-            print_success "All services restarted"
-            sleep 3
-        else
-            print_error "Failed to restart services"
-            sleep 3
-        fi
-    fi
-}
-
-stop_all_services() {
-    clear
-    print_header "Stop All Services"
-    
-    print_warning "This will stop all OneStack services"
-    read -p "Are you sure? (y/N): " confirm
-    
-    if [ "$confirm" = "y" ]; then
-        print_step "Stopping all services..."
-        cd /opt/onestack
-        
-        if docker compose down 2>/dev/null; then
-            print_success "All services stopped"
-            print_info "To start again: cd /opt/onestack && docker compose up -d"
-            
-            read -p "Press Enter to exit..."
-            exit 0
-        else
-            print_error "Failed to stop services"
-            sleep 3
-        fi
-    fi
-}
-
-# ═══════════════════════════════════════════════════
-# Main Entry Point
+# Main
 # ═══════════════════════════════════════════════════
 
 main() {
-    check_root
-    check_installation
-    check_prerequisites
+    # ตรวจสอบ root
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Please run as root (use sudo)"
+        exit 1
+    fi
     
-    show_main_menu
+    # ตรวจสอบ installation
+    check_installation
+    
+    # แสดง menu loop
+    while true; do
+        show_menu
+    done
 }
 
-# Run
+# รัน
 main

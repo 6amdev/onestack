@@ -1,195 +1,217 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# Task: SSL Setup
-# Description: Setup SSL certificates with Let's Encrypt
+# OneStack - Quick SSL Setup
+# Automatically configure SSL for all services
 # ═══════════════════════════════════════════════════
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh"
+INSTALL_DIR="/opt/onestack"
 
-# Source SSL functions
-if [ -f "$SCRIPT_DIR/lib/06-ssl.sh" ]; then
-    source "$SCRIPT_DIR/lib/06-ssl.sh"
-else
-    print_error "SSL library not found: $SCRIPT_DIR/lib/06-ssl.sh"
+# โหลด utilities
+source "$SCRIPT_DIR/lib/utils.sh" 2>/dev/null || {
+    echo "Error: Cannot load utilities"
     exit 1
-fi
+}
+
+# โหลด SSL functions
+source "$SCRIPT_DIR/lib/06-ssl.sh" 2>/dev/null || {
+    print_error "Cannot load SSL functions"
+    exit 1
+}
 
 # ═══════════════════════════════════════════════════
-# Main SSL Setup
+# Main
 # ═══════════════════════════════════════════════════
 
 main() {
     clear
-    print_header "SSL Certificate Setup"
     
-    # Check if OneStack is installed
-    if [ ! -d "/opt/onestack" ]; then
-        print_error "OneStack not installed"
+    echo ""
+    echo "╔════════════════════════════════════════════════╗"
+    echo "║                                                ║"
+    echo "║       OneStack SSL Certificate Setup           ║"
+    echo "║         Smart Auto-Discovery System            ║"
+    echo "║                                                ║"
+    echo "╚════════════════════════════════════════════════╝"
+    echo ""
+    
+    # ตรวจสอบ root
+    if [ "$EUID" -ne 0 ]; then
+        print_error "This script must be run as root"
+        echo ""
+        print_info "Please run: sudo bash tasks/ssl-setup.sh"
         exit 1
     fi
     
-    cd /opt/onestack
-    
-    # Get domain from .env
-    local DOMAIN=$(grep "^DOMAIN=" .env 2>/dev/null | cut -d= -f2)
-    
-    if [ -z "$DOMAIN" ]; then
+    # ตรวจสอบว่าติดตั้ง OneStack แล้ว
+    if [ ! -d "$INSTALL_DIR" ]; then
+        print_error "OneStack not installed"
         echo ""
-        print_warning "Domain not configured in .env"
-        echo ""
-        read -p "Enter your domain name (e.g., example.com): " DOMAIN
-        
-        if [ -z "$DOMAIN" ]; then
-            print_error "Domain is required"
-            exit 1
-        fi
-        
-        # Add to .env
-        echo "" >> .env
-        echo "# Domain Configuration" >> .env
-        echo "DOMAIN=$DOMAIN" >> .env
-        print_success "Added DOMAIN to .env"
+        print_info "Please install OneStack first:"
+        echo "  sudo bash install.sh"
+        exit 1
     fi
     
-    echo ""
-    print_info "Domain: $DOMAIN"
+    cd "$INSTALL_DIR"
     
-    # Get email for Let's Encrypt
-    local EMAIL=$(grep "^SSL_EMAIL=" .env 2>/dev/null | cut -d= -f2)
-    
-    if [ -z "$EMAIL" ]; then
-        echo ""
-        read -p "Enter email for SSL notifications: " EMAIL
-        
-        if [ -z "$EMAIL" ]; then
-            print_error "Email is required for Let's Encrypt"
-            exit 1
-        fi
-        
-        # Add to .env
-        echo "SSL_EMAIL=$EMAIL" >> .env
-        print_success "Added SSL_EMAIL to .env"
+    # โหลด configuration
+    if [ ! -f ".env" ]; then
+        print_error ".env file not found"
+        exit 1
     fi
     
-    echo ""
-    print_info "Email: $EMAIL"
+    source .env
     
-    # Check DNS
-    echo ""
-    print_header "DNS Verification"
-    
-    print_step "Checking DNS records for $DOMAIN..."
-    
-    local SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || echo "unknown")
-    local DOMAIN_IP=$(dig +short "$DOMAIN" 2>/dev/null | tail -n1)
-    
-    echo "  Server IP: $SERVER_IP"
-    echo "  Domain IP: $DOMAIN_IP"
-    
-    if [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
+    # ตรวจสอบ domain
+    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "localhost" ]; then
+        print_error "Domain not configured"
         echo ""
-        print_warning "DNS mismatch detected!"
+        print_info "Please set your domain in .env file:"
         echo ""
-        echo "Required DNS Records:"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Type    Host    Value"
-        echo "  A       @       $SERVER_IP"
-        echo "  A       *       $SERVER_IP"
-        echo "  CNAME   www     @"
+        echo "  nano $INSTALL_DIR/.env"
+        echo ""
+        echo "Add these lines:"
+        echo "  DOMAIN=yourdomain.com"
+        echo "  SSL_EMAIL=admin@yourdomain.com"
+        echo "  SSL_MODE=production"
+        echo ""
+        exit 1
+    fi
+    
+    # แสดง configuration
+    print_header "Current Configuration"
+    echo ""
+    echo "  📌 Domain: $DOMAIN"
+    echo "  📧 Email: ${SSL_EMAIL:-admin@$DOMAIN}"
+    echo "  🔧 Mode: ${SSL_MODE:-production}"
+    echo ""
+    
+    # คำเตือนสำหรับ production mode
+    if [ "${SSL_MODE:-production}" = "production" ]; then
+        print_warning "PRODUCTION MODE"
+        echo ""
+        echo "  This will request REAL certificates from Let's Encrypt"
+        echo ""
+        echo "  Rate Limits:"
+        echo "    • 5 certificates per week per domain"
+        echo "    • 50 certificates per week per account"
+        echo ""
+        echo "  If testing, set SSL_MODE=staging in .env"
         echo ""
         
-        if ! confirm "Continue with SSL setup anyway?"; then
-            print_info "SSL setup cancelled"
+        if ! confirm "Continue with PRODUCTION mode?"; then
+            print_info "Setup cancelled"
+            echo ""
+            print_info "To use staging mode:"
+            echo "  1. Edit: nano $INSTALL_DIR/.env"
+            echo "  2. Add/change: SSL_MODE=staging"
+            echo "  3. Run this script again"
             exit 0
         fi
     else
-        print_success "DNS is correctly configured"
-    fi
-    
-    # SSL setup mode
-    echo ""
-    print_header "SSL Setup Mode"
-    echo ""
-    echo "Choose SSL setup mode:"
-    echo "  1) Individual certificates per subdomain (Recommended)"
-    echo "  2) Wildcard certificate (*.domain.com) - Requires DNS validation"
-    echo "  0) Cancel"
-    echo ""
-    
-    read -p "Select mode [0-2]: " mode
-    
-    local SSL_MODE
-    case $mode in
-        1)
-            SSL_MODE="individual"
-            print_info "Using individual certificates mode"
-            ;;
-        2)
-            SSL_MODE="wildcard"
-            print_info "Using wildcard mode"
-            ;;
-        0)
-            print_info "Cancelled"
+        print_info "STAGING MODE - Test certificates only"
+        echo ""
+        print_warning "Browsers will show 'Not Secure' warning"
+        echo ""
+        
+        if ! confirm "Continue with STAGING mode?"; then
             exit 0
-            ;;
-        *)
-            print_error "Invalid choice"
-            exit 1
-            ;;
-    esac
-    
-    # Confirm
-    echo ""
-    print_warning "This will:"
-    echo "  1. Install Certbot (if not installed)"
-    echo "  2. Request SSL certificates from Let's Encrypt"
-    echo "  3. Setup auto-renewal (twice daily)"
-    echo ""
-    
-    if ! confirm "Continue with SSL setup?"; then
-        print_info "SSL setup cancelled"
-        exit 0
+        fi
     fi
     
-    # Run setup
     echo ""
-    print_header "Installing SSL Certificates"
+    print_info "Starting Smart SSL Setup..."
     echo ""
+    sleep 2
     
-    # Call the setup_ssl function with correct parameters
-    setup_ssl "$DOMAIN" "$EMAIL" "$SSL_MODE"
+    # เรียกใช้ Smart SSL Manager
+    setup_ssl_smart "$INSTALL_DIR" "$INSTALL_DIR/.env"
     
-    local exit_code=$?
+    local result=$?
     
-    if [ $exit_code -eq 0 ]; then
+    if [ $result -eq 0 ]; then
         echo ""
-        print_success "SSL setup completed successfully!"
+        echo "╔════════════════════════════════════════════════╗"
+        echo "║                                                ║"
+        echo "║         ✅ SSL Setup Complete!                 ║"
+        echo "║                                                ║"
+        echo "╚════════════════════════════════════════════════╝"
         echo ""
-        print_info "Your sites are now accessible via HTTPS:"
-        echo "  ✅ https://$DOMAIN"
-        echo "  ✅ https://www.$DOMAIN"
-        echo "  ✅ https://storage.$DOMAIN"
-        echo "  ✅ https://api.$DOMAIN"
-        echo "  ✅ https://monitor.$DOMAIN"
+        
+        # แสดง URLs ที่พร้อมใช้งาน
+        print_success "Your secure URLs:"
         echo ""
-        print_info "Test your SSL grade:"
-        print_info "  https://www.ssllabs.com/ssltest/analyze.html?d=$DOMAIN"
+        
+        # อ่าน services จาก docker-compose
+        if [ -f "docker-compose.yml" ]; then
+            # Main site
+            echo "  🌐 https://$DOMAIN"
+            echo "  🌐 https://www.$DOMAIN"
+            echo ""
+            
+            # Services
+            if docker compose ps | grep -q "minio"; then
+                echo "  💾 MinIO Console: https://storage.$DOMAIN"
+                echo "  💾 S3 API: https://s3.$DOMAIN"
+            fi
+            
+            if docker compose ps | grep -q "parse"; then
+                echo "  🚀 Parse Server: https://api.$DOMAIN"
+            fi
+            
+            if docker compose ps | grep -q "n8n"; then
+                echo "  🔄 n8n: https://flow.$DOMAIN"
+            fi
+            
+            if docker compose ps | grep -q "chatwoot"; then
+                echo "  💬 Chatwoot: https://chat.$DOMAIN"
+            fi
+            
+            if docker compose ps | grep -q "grafana"; then
+                echo "  📊 Grafana: https://monitor.$DOMAIN"
+            fi
+            
+            if docker compose ps | grep -q "adminer"; then
+                echo "  🗄️ Adminer: https://db.$DOMAIN"
+            fi
+        fi
+        
         echo ""
-        print_info "Auto-renewal is configured to run twice daily"
+        print_info "SSL Management:"
+        echo "  • Auto-renewal: Enabled (twice daily)"
+        echo "  • Manual renewal: certbot renew"
+        echo "  • Check status: certbot certificates"
+        echo ""
+        
+        print_info "Useful Commands:"
+        echo "  • View logs: tail -f /opt/onestack/logs/ssl-renewal.log"
+        echo "  • Test renewal: certbot renew --dry-run"
+        echo "  • Nginx reload: docker compose exec nginx nginx -s reload"
+        echo ""
+        
     else
         echo ""
         print_error "SSL setup failed"
         echo ""
         print_info "Common issues:"
-        echo "  1. DNS not pointing to this server"
-        echo "  2. Ports 80/443 not accessible"
-        echo "  3. Domain validation failed"
+        echo "  1. DNS not configured correctly"
+        echo "     → Check: dig $DOMAIN"
         echo ""
-        print_info "For manual setup, run:"
-        echo "  certbot certonly --nginx -d $DOMAIN -d www.$DOMAIN --email $EMAIL"
+        echo "  2. Port 80/443 not accessible"
+        echo "     → Check firewall: ufw status"
+        echo ""
+        echo "  3. Nginx not running"
+        echo "     → Check: docker compose ps nginx"
+        echo ""
+        print_info "For help, check:"
+        echo "  • Logs: /var/log/letsencrypt/letsencrypt.log"
+        echo "  • Documentation: docs/ssl-setup.md"
+        echo ""
         exit 1
     fi
 }
 
+# Run
 main "$@"
