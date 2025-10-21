@@ -243,6 +243,9 @@ EOF
             alpine sh -c "cp -a /source/. /target/" 2>/dev/null || true
     fi
     
+    print_info "  ► Pulling Docker images (this may take a few minutes)..."
+    docker compose pull --quiet 2>&1 | grep -v "Pulling" || true
+    
     print_info "  ► Starting all containers..."
     docker compose up -d
     
