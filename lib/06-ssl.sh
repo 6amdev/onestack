@@ -716,8 +716,18 @@ setup_ssl_smart() {
         print_success "All domains have valid SSL certificates"
     fi
     
-    # 5. Generate HTTPS config
+    # 5. Backup and disable HTTP-only config
     print_header "Step 5: Update Nginx Configuration"
+    
+    # Disable old HTTP-only config to prevent conflicts
+    local http_conf="$install_dir/nginx/conf.d/onestack.conf"
+    if [ -f "$http_conf" ]; then
+        print_step "Disabling HTTP-only configuration..."
+        mv "$http_conf" "$http_conf.http-only" 2>/dev/null || true
+        print_success "HTTP-only config disabled (renamed to onestack.conf.http-only)"
+    fi
+    
+    # Generate HTTPS config
     generate_nginx_https_config "$DOMAIN" "$services"
     
     # Test และ reload nginx
