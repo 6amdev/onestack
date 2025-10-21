@@ -1,5 +1,131 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
+# System Control
+# ═══════════════════════════════════════════════════
+
+system_control_menu() {
+    clear
+    print_header "System Control"
+    
+    cd "$INSTALL_DIR"
+    
+    echo "System Actions:"
+    echo ""
+    echo "  1) Restart All Services (Docker only)"
+    echo "  2) Restart Nginx"
+    echo "  3) Restart Database Services"
+    echo "  4) Reboot Server (graceful)"
+    echo "  5) Shutdown Server"
+    echo "  6) Return to menu"
+    echo ""
+    read -p "Choose action [1-6]: " sys_choice
+    
+    case $sys_choice in
+        1)
+            print_warning "This will restart all Docker services"
+            if confirm "Continue?"; then
+                print_step "Restarting all services..."
+                docker compose restart
+                print_success "All services restarted"
+                echo ""
+                print_info "Services status:"
+                docker compose ps
+            fi
+            ;;
+        2)
+            print_warning "This will restart Nginx only"
+            if confirm "Continue?"; then
+                print_step "Restarting Nginx..."
+                docker compose restart nginx
+                print_success "Nginx restarted"
+            fi
+            ;;
+        3)
+            print_warning "This will restart PostgreSQL, MongoDB, and Redis"
+            if confirm "Continue?"; then
+                print_step "Restarting databases..."
+                docker compose restart postgres mongodb redis
+                print_success "Database services restarted"
+            fi
+            ;;
+        4)
+            print_warning "⚠️  This will reboot the entire server!"
+            echo ""
+            print_info "Before rebooting:"
+            echo "  1. All Docker services will be stopped gracefully"
+            echo "  2. System will wait for all processes to close"
+            echo "  3. Server will reboot automatically"
+            echo "  4. Services will auto-start after reboot"
+            echo ""
+            
+            if confirm "Are you sure you want to reboot?"; then
+                print_step "Stopping all services gracefully..."
+                docker compose down
+                
+                print_success "Services stopped"
+                echo ""
+                
+                print_warning "Server will reboot in 10 seconds..."
+                echo "Press Ctrl+C to cancel"
+                
+                for i in {10..1}; do
+                    echo -ne "  Rebooting in $i seconds...\r"
+                    sleep 1
+                done
+                
+                echo ""
+                print_step "Rebooting now..."
+                reboot
+            else
+                print_info "Reboot cancelled"
+            fi
+            ;;
+        5)
+            print_warning "⚠️  This will shutdown the entire server!"
+            echo ""
+            print_info "Before shutdown:"
+            echo "  1. All Docker services will be stopped gracefully"
+            echo "  2. System will wait for all processes to close"
+            echo "  3. Server will power off"
+            echo ""
+            
+            if confirm "Are you sure you want to shutdown?"; then
+                print_step "Stopping all services gracefully..."
+                docker compose down
+                
+                print_success "Services stopped"
+                echo ""
+                
+                print_warning "Server will shutdown in 10 seconds..."
+                echo "Press Ctrl+C to cancel"
+                
+                for i in {10..1}; do
+                    echo -ne "  Shutting down in $i seconds...\r"
+                    sleep 1
+                done
+                
+                echo ""
+                print_step "Shutting down now..."
+                shutdown -h now
+            else
+                print_info "Shutdown cancelled"
+            fi
+            ;;
+        6)
+            return
+            ;;
+        *)
+            print_error "Invalid choice"
+            ;;
+    esac
+    
+    if [ "$sys_choice" != "4" ] && [ "$sys_choice" != "5" ] && [ "$sys_choice" != "6" ]; then
+        echo ""
+        read -p "Press Enter to return to menu..."
+    fi
+}
+
+# ═══════════════════════════════════════════════════
 # OneStack Manager
 # Manage your OneStack installation
 # ═══════════════════════════════════════════════════
@@ -429,11 +555,12 @@ show_menu() {
     echo "  3) Add Redirect Domain"
     echo "  4) Add Service"
     echo "  5) Service Control"
-    echo "  6) Backup System"
-    echo "  7) System Information"
-    echo "  8) Exit"
+    echo "  6) System Control (Restart/Reboot)"
+    echo "  7) Backup System"
+    echo "  8) System Information"
+    echo "  9) Exit"
     echo ""
-    read -p "Choose option [1-8]: " choice
+    read -p "Choose option [1-9]: " choice
     
     case $choice in
         1) show_status ;;
@@ -441,9 +568,10 @@ show_menu() {
         3) add_redirect_domain_menu ;;
         4) add_service_menu ;;
         5) service_control_menu ;;
-        6) backup_menu ;;
-        7) show_system_info ;;
-        8) 
+        6) system_control_menu ;;
+        7) backup_menu ;;
+        8) show_system_info ;;
+        9) 
             clear
             print_success "Goodbye!"
             exit 0
