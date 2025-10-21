@@ -195,19 +195,23 @@ EOF
     cd "$install_dir"
     
     # Stop และลบ container อย่างสมบูรณ์เพื่อป้องกัน read-only filesystem
-    print_info "  ► Stopping nginx gracefully..."
-    docker compose stop nginx
+    print_info "  ► Stopping all containers..."
+    docker compose stop
     sleep 2
     
-    print_info "  ► Removing old container..."
+    print_info "  ► Removing old nginx container..."
     docker rm -f onestack-nginx 2>/dev/null || true
     sleep 1
     
     print_info "  ► Cleaning stale mounts..."
     docker system prune -f >/dev/null 2>&1
     
-    print_info "  ► Starting nginx with new volumes..."
-    docker compose up -d nginx
+    print_info "  ► Restarting Docker daemon (fixing overlay2)..."
+    sudo systemctl restart docker
+    sleep 10
+    
+    print_info "  ► Starting all containers..."
+    docker compose up -d
     
     sleep 5
     
