@@ -255,6 +255,9 @@ ssl_prefer_server_ciphers off;
 ssl_session_cache shared:SSL:10m;
 ssl_session_timeout 10m;
 
+# HTTP/2
+http2 on;
+
 # Security Headers
 add_header Strict-Transport-Security "max-age=63072000" always;
 add_header X-Frame-Options "SAMEORIGIN" always;
@@ -276,7 +279,7 @@ server {
 # ═══════════════════════════════════════════════════
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $base_domain www.$base_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -313,7 +316,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $minio_console;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -331,7 +334,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $minio_api;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -366,7 +369,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $parse_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -399,7 +402,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $n8n_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -437,7 +440,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $chat_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -475,7 +478,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $grafana_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -512,7 +515,7 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $adminer_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
