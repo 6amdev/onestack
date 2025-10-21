@@ -12,15 +12,11 @@ discover_services() {
     local compose_file="$1"
     local services=()
     
-    print_step "Discovering installed services..."
-    
-    # อ่าน services จาก docker-compose.yml
+    # อ่าน services จาก docker-compose.yml (เงียบ)
     if [ -f "$compose_file" ]; then
-        # ใช้ grep หา service names
         while IFS= read -r line; do
             if [[ $line =~ ^[[:space:]]*([a-z0-9_-]+):[[:space:]]*$ ]]; then
                 service="${BASH_REMATCH[1]}"
-                # กรองเฉพาะ services ที่เราสนใจ
                 case $service in
                     nginx|postgres|mongodb|redis|minio|parse|n8n|chatwoot|grafana|prometheus|adminer)
                         services+=("$service")
@@ -29,6 +25,9 @@ discover_services() {
             fi
         done < "$compose_file"
     fi
+    
+    # ลบ duplicates
+    services=($(printf "%s\n" "${services[@]}" | sort -u))
     
     echo "${services[@]}"
 }
@@ -42,9 +41,7 @@ discover_domains() {
     local services="$2"
     local domains=()
     
-    print_step "Discovering domains and subdomains..."
-    
-    # เพิ่ม primary domain และ www
+    # เพิ่ม primary domain และ www (เงียบ)
     domains+=("$base_domain")
     domains+=("www.$base_domain")
     
@@ -571,6 +568,8 @@ setup_ssl_smart() {
     
     # 1. Discover services
     print_header "Step 1: Service Discovery"
+    
+    print_step "Scanning docker-compose.yml..."
     local services=$(discover_services "$install_dir/docker-compose.yml")
     
     if [ -z "$services" ]; then
@@ -578,17 +577,19 @@ setup_ssl_smart() {
         return 1
     fi
     
-    print_success "Discovered services:"
+    print_success "Found $(echo $services | wc -w) services:"
     for svc in $services; do
-        echo "  ✓ $svc"
+        echo "  • $svc"
     done
     echo ""
     
     # 2. Discover domains
     print_header "Step 2: Domain Discovery"
+    
+    print_step "Generating domain list..."
     local all_domains=$(discover_domains "$DOMAIN" "$services")
     
-    print_success "Discovered domains:"
+    print_success "Found $(echo $all_domains | wc -w) domains:"
     for dom in $all_domains; do
         echo "  • $dom"
     done
