@@ -1,13 +1,18 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════
-# SSL Functions - Complete Version with Auto-Fix
-# Fixed: Better volume detection and insertion
+# OneStack - Smart SSL Manager
+# Automatically discovers services and manages SSL
+# ═══════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════
+# Discover Installed Services
 # ═══════════════════════════════════════════════════
 
 discover_services() {
     local compose_file="$1"
     local services=()
     
+    # อ่าน services จาก docker-compose.yml (เงียบ)
     if [ -f "$compose_file" ]; then
         while IFS= read -r line; do
             if [[ $line =~ ^[[:space:]]*([a-z0-9_-]+):[[:space:]]*$ ]]; then
@@ -21,46 +26,77 @@ discover_services() {
         done < "$compose_file"
     fi
     
+    # ลบ duplicates
     services=($(printf "%s\n" "${services[@]}" | sort -u))
+    
     echo "${services[@]}"
 }
+
+# ═══════════════════════════════════════════════════
+# Discover All Domains & Subdomains
+# ═══════════════════════════════════════════════════
 
 discover_domains() {
     local base_domain="$1"
     local services="$2"
     local domains=()
     
-    domains+=("$base_domain" "www.$base_domain")
+    # เพิ่ม primary domain และ www (เงียบ)
+    domains+=("$base_domain")
+    domains+=("www.$base_domain")
     
+    # แปลง services เป็น subdomains
     for service in $services; do
         case $service in
             minio)
-                domains+=("storage.$base_domain" "s3.$base_domain")
+                domains+=("storage.$base_domain")
+                domains+=("s3.$base_domain")
                 ;;
-            parse) domains+=("api.$base_domain") ;;
-            n8n) domains+=("flow.$base_domain") ;;
-            chatwoot) domains+=("chat.$base_domain") ;;
-            grafana) domains+=("monitor.$base_domain") ;;
-            prometheus) domains+=("prometheus.$base_domain") ;;
-            adminer) domains+=("db.$base_domain") ;;
+            parse)
+                domains+=("api.$base_domain")
+                ;;
+            n8n)
+                domains+=("flow.$base_domain")
+                ;;
+            chatwoot)
+                domains+=("chat.$base_domain")
+                ;;
+            grafana)
+                domains+=("monitor.$base_domain")
+                ;;
+            prometheus)
+                domains+=("prometheus.$base_domain")
+                ;;
+            adminer)
+                domains+=("db.$base_domain")
+                ;;
         esac
     done
     
+    # ลบ duplicates และ sort
     domains=($(printf "%s\n" "${domains[@]}" | sort -u))
+    
     echo "${domains[@]}"
 }
 
+# ═══════════════════════════════════════════════════
+# Check Existing SSL Certificates
+# ═══════════════════════════════════════════════════
+
 check_existing_ssl() {
     local domain="$1"
-    local cert_dir="${CERTBOT_DIR:-/opt/onestack/certbot/conf}/live"
+    local cert_dir="/etc/letsencrypt/live"
     
+    # ตรวจสอบว่ามี directory และไฟล์ cert
     if [ -d "$cert_dir/$domain" ] && [ -f "$cert_dir/$domain/fullchain.pem" ]; then
+        # ตรวจสอบวันหมดอายุ
         local expiry=$(openssl x509 -in "$cert_dir/$domain/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2)
         
         if [ -n "$expiry" ]; then
             local expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo "0")
             local now_epoch=$(date +%s)
             
+            # ถ้า parse date ไม่ได้ ให้ถือว่ามี cert
             if [ "$expiry_epoch" = "0" ]; then
                 return 0
             fi
@@ -68,339 +104,40 @@ check_existing_ssl() {
             local days_left=$(( ($expiry_epoch - $now_epoch) / 86400 ))
             
             if [ $days_left -gt 30 ]; then
-                return 0
+                return 0  # มี cert และยังไม่หมดอายุ
             else
-                return 2
+                return 2  # มี cert แต่ใกล้หมดอายุ
             fi
         fi
     fi
     
-    return 1
+    return 1  # ไม่มี cert
 }
 
 # ═══════════════════════════════════════════════════
-# FIXED: Better volume insertion
+# Request SSL Certificate (Wildcard)
 # ═══════════════════════════════════════════════════
-
-setup_acme_challenge() {
-    local install_dir="$1"
-    
-    print_step "Setting up ACME challenge directory..."
-    
-    mkdir -p "$install_dir/certbot/"{conf,www,logs}
-    mkdir -p "$install_dir/certbot/www/.well-known/acme-challenge"
-    chmod -R 755 "$install_dir/certbot"
-    
-    print_success "Directories created"
-    
-    cat > "$install_dir/nginx/conf.d/00-acme-challenge.conf" << 'EOF'
-server {
-    listen 80 default_server;
-    server_name _;
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-        try_files $uri =404;
-    }
-    
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-EOF
-    
-    print_success "ACME challenge nginx config created"
-    
-    print_step "Checking nginx volumes in docker-compose.yml..."
-    
-    # ตรวจสอบว่ามี certbot volume หรือยัง (ตรวจสอบทั้ง bind mount และ named volume)
-    if ! grep -q "certbot.*:/var/www/certbot" "$install_dir/docker-compose.yml"; then
-        print_warning "⚠️  Missing certbot volume in nginx service!"
-        print_info "Adding volume automatically..."
-        
-        # Backup
-        cp "$install_dir/docker-compose.yml" "$install_dir/docker-compose.yml.backup-$(date +%Y%m%d-%H%M%S)"
-        print_success "Backup created"
-        
-        # วิธีที่ 1: ใช้ sed (แนะนำ - ง่ายและแม่นยำ)
-        if grep -q "/etc/letsencrypt:/etc/letsencrypt:ro" "$install_dir/docker-compose.yml"; then
-            print_info "Method: Insert after letsencrypt line"
-            sed -i '/\/etc\/letsencrypt:\/etc\/letsencrypt:ro/a\      - ./certbot/www:/var/www/certbot:ro' "$install_dir/docker-compose.yml"
-            
-            if [ $? -eq 0 ]; then
-                print_success "✅ Volume added successfully (sed method)"
-            else
-                print_error "Failed to add volume with sed"
-                return 1
-            fi
-        else
-            # วิธีที่ 2: ใช้ awk (fallback)
-            print_info "Method: AWK insertion"
-            awk '
-            /^[[:space:]]*nginx:/ { in_nginx=1 }
-            /^[[:space:]]*volumes:/ && in_nginx { 
-                print
-                getline
-                print
-                print "      - ./certbot/www:/var/www/certbot:ro"
-                in_nginx=0
-                next
-            }
-            /^[[:space:]]*[a-z_-]+:/ && !/^[[:space:]]*-/ { in_nginx=0 }
-            { print }
-            ' "$install_dir/docker-compose.yml" > "${install_dir}/docker-compose.yml.tmp"
-            
-            if [ $? -eq 0 ] && [ -s "${install_dir}/docker-compose.yml.tmp" ]; then
-                mv "${install_dir}/docker-compose.yml.tmp" "$install_dir/docker-compose.yml"
-                print_success "✅ Volume added successfully (awk method)"
-            else
-                print_error "Failed to add volume with awk"
-                rm -f "${install_dir}/docker-compose.yml.tmp"
-                return 1
-            fi
-        fi
-        
-        # ตรวจสอบอีกครั้ง
-        if grep -q "certbot/www:/var/www/certbot" "$install_dir/docker-compose.yml"; then
-            print_success "Volume verification: ✅ PASSED"
-        else
-            print_error "Volume verification: ❌ FAILED"
-            print_warning "Please add manually:"
-            echo "      - ./certbot/www:/var/www/certbot:ro"
-            return 1
-        fi
-    else
-        print_success "✅ Certbot volume already configured"
-    fi
-    
-    # แสดง nginx volumes ที่มีอยู่
-    echo ""
-    print_info "Current nginx volumes:"
-    grep -A 10 "nginx:" "$install_dir/docker-compose.yml" | grep "volumes:" -A 10 | grep "^[[:space:]]*-" | head -8
-    echo ""
-    
-    # ปิด config เก่า
-    print_step "Disabling old configs..."
-    [ -f "$install_dir/nginx/conf.d/onestack.conf" ] && \
-        mv "$install_dir/nginx/conf.d/onestack.conf" "$install_dir/nginx/conf.d/onestack.conf.disabled" 2>/dev/null && \
-        print_info "  ✓ onestack.conf → disabled"
-    
-    [ -f "$install_dir/nginx/conf.d/https.conf" ] && \
-        mv "$install_dir/nginx/conf.d/https.conf" "$install_dir/nginx/conf.d/https.conf.old" 2>/dev/null && \
-        print_info "  ✓ https.conf → old"
-    
-    echo ""
-    print_step "Fixing Docker and recreating nginx..."
-    
-    cd "$install_dir"
-    
-    # SIMPLE FIX: ไม่ลบ overlay2 แต่ใช้ Docker native cleanup
-    print_info "  ► Stopping all containers..."
-    docker compose down 2>/dev/null || true
-    sleep 2
-    
-    print_info "  ► Converting to named volume (permanent fix)..."
-    
-    # แทนที่ bind mount ด้วย named volume
-    if grep -q "./certbot/www:/var/www/certbot" docker-compose.yml; then
-        cp docker-compose.yml docker-compose.yml.pre-volume-fix
-        
-        sed -i 's|./certbot/www:/var/www/certbot:ro|certbot_www:/var/www/certbot|g' docker-compose.yml
-        
-        # เพิ่ม volume definition
-        if ! grep -q "^volumes:" docker-compose.yml; then
-            echo "" >> docker-compose.yml
-            echo "volumes:" >> docker-compose.yml
-        fi
-        
-        if ! grep -q "  certbot_www:" docker-compose.yml; then
-            sed -i '/^volumes:/a\  certbot_www:' docker-compose.yml
-        fi
-        
-        print_success "  ✓ Converted to named volume"
-    fi
-    
-    print_info "  ► Cleaning Docker system..."
-    docker system prune -af --volumes >/dev/null 2>&1 || true
-    
-    print_info "  ► Creating certbot volume..."
-    docker volume create certbot_www >/dev/null 2>&1 || true
-    
-    if [ -d "$install_dir/certbot/www/.well-known" ]; then
-        print_info "  ► Copying certbot data..."
-        docker run --rm \
-            -v certbot_www:/target \
-            -v "$install_dir/certbot/www:/source:ro" \
-            alpine sh -c "cp -a /source/. /target/" 2>/dev/null || true
-    fi
-    
-    print_info "  ► Starting all containers..."
-    docker compose up -d --build
-    
-    sleep 15
-    
-    # ตรวจสอบว่า nginx ทำงานหรือยัง
-    if ! docker compose ps nginx 2>/dev/null | grep -q "Up"; then
-        print_error "Nginx failed to start!"
-        print_info "Checking logs..."
-        docker compose logs --tail=30 nginx
-        return 1
-    fi
-    
-    print_success "Nginx container recreated"
-    
-    echo ""
-    print_step "Testing ACME challenge path..."
-    
-    # ทดสอบด้วย named volume
-    local test_content="test-$(date +%s)"
-    
-    print_info "  ► Creating test file in volume..."
-    docker run --rm -v certbot_www:/data alpine sh -c "echo '$test_content' > /data/.well-known/acme-challenge/test-file"
-    
-    sleep 3
-    
-    # ทดสอบ 3 ครั้ง
-    local test_result=""
-    for i in {1..3}; do
-        test_result=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost/.well-known/acme-challenge/test-file" 2>/dev/null)
-        if [ "$test_result" = "200" ]; then
-            break
-        fi
-        print_info "Attempt $i/3: HTTP $test_result (retrying...)"
-        sleep 2
-    done
-    
-    # ลบไฟล์ทดสอบ
-    docker run --rm -v certbot_www:/data alpine rm -f /data/.well-known/acme-challenge/test-file
-    
-    if [ "$test_result" = "200" ]; then
-        print_success "✅ ACME challenge path working! (HTTP $test_result)"
-        echo ""
-        return 0
-    else
-        print_error "❌ ACME challenge path NOT working! (HTTP $test_result)"
-        print_warning "Let's Encrypt will FAIL to verify domains!"
-        
-        echo ""
-        print_info "=== Debugging Information ==="
-        echo ""
-        
-        print_info "1. Container file system check:"
-        docker compose exec -T nginx ls -la /var/www/certbot/.well-known/acme-challenge/ 2>&1 | head -10 || \
-            print_error "Cannot access container filesystem"
-        
-        echo ""
-        print_info "2. Recent nginx logs:"
-        docker compose logs --tail=30 nginx 2>&1 | tail -20
-        
-        echo ""
-        print_info "3. Nginx config test:"
-        docker compose exec -T nginx nginx -t 2>&1
-        
-        echo ""
-        print_info "4. Volume mounts:"
-        docker compose exec -T nginx mount | grep certbot || \
-            print_error "No certbot volume mounted!"
-        
-        echo ""
-        print_warning "Common issues:"
-        echo "  • Volume not mounted correctly"
-        echo "  • Nginx config syntax error"
-        echo "  • Port 80 blocked by firewall"
-        echo "  • Another service using port 80"
-        
-        echo ""
-        if ! confirm "Continue anyway? (Not recommended)"; then
-            return 1
-        fi
-    fi
-}
-
-request_certificate_webroot() {
-    local domains="$1"
-    local email="$2"
-    local mode="$3"
-    local certbot_dir="$4"
-    
-    print_step "Requesting SSL certificate (webroot method)..."
-    
-    local staging_flag=""
-    if [ "$mode" = "staging" ]; then
-        staging_flag="--staging"
-        print_warning "Using STAGING mode (test certificates)"
-    else
-        print_info "Using PRODUCTION mode (real certificates)"
-    fi
-    
-    local domain_args=""
-    for d in $domains; do
-        domain_args="$domain_args -d $d"
-    done
-    
-    echo ""
-    print_info "Configuration:"
-    print_info "  Method: Webroot (no downtime)"
-    print_info "  Email: $email"
-    print_info "  Domains: $domains"
-    print_info "  Mode: ${mode:-production}"
-    echo ""
-    
-    print_step "Running certbot..."
-    
-    docker run --rm \
-        -v "$certbot_dir/conf:/etc/letsencrypt" \
-        -v "$certbot_dir/www:/var/www/certbot" \
-        -v "$certbot_dir/logs:/var/log/letsencrypt" \
-        certbot/certbot certonly \
-        --webroot \
-        --webroot-path=/var/www/certbot \
-        $staging_flag \
-        --email "$email" \
-        --agree-tos \
-        --no-eff-email \
-        --non-interactive \
-        $domain_args
-    
-    local result=$?
-    
-    if [ $result -eq 0 ]; then
-        print_success "✅ Certificate obtained successfully!"
-    else
-        print_error "❌ Certificate request failed (exit code: $result)"
-        
-        echo ""
-        print_info "Check logs:"
-        echo "  cat $certbot_dir/logs/letsencrypt.log"
-    fi
-    
-    return $result
-}
 
 request_wildcard_certificate() {
     local domain="$1"
     local email="$2"
-    local mode="$3"
-    local certbot_dir="$4"
+    local mode="$3"  # production or staging
     
     print_step "Requesting wildcard certificate for *.$domain"
     
+    # ตรวจสอบ mode
     local staging_flag=""
     if [ "$mode" = "staging" ]; then
         staging_flag="--staging"
-        print_warning "Using STAGING mode"
+        print_warning "Using STAGING mode (test certificates)"
     fi
     
-    echo ""
-    print_warning "⚠️  Wildcard certificates require DNS validation"
-    print_info "You'll need to add a TXT record during the process"
-    print_info "The process will pause and wait for you to add the record"
+    # ต้องใช้ DNS validation สำหรับ wildcard
+    print_info "Wildcard certificates require DNS validation"
+    print_info "You'll need to add a TXT record to your DNS"
     echo ""
     
-    docker run --rm -it \
-        -v "$certbot_dir/conf:/etc/letsencrypt" \
-        -v "$certbot_dir/logs:/var/log/letsencrypt" \
-        certbot/certbot certonly \
+    certbot certonly \
         --manual \
         --preferred-challenges dns \
         $staging_flag \
@@ -413,51 +150,113 @@ request_wildcard_certificate() {
     return $?
 }
 
+# ═══════════════════════════════════════════════════
+# Request SSL Certificate (HTTP-01)
+# ═══════════════════════════════════════════════════
+
+request_certificate_http() {
+    local domains="$1"  # รับหลาย domains
+    local email="$2"
+    local mode="$3"
+    local webroot="$4"
+    
+    print_step "Requesting SSL certificate..."
+    
+    local staging_flag=""
+    if [ "$mode" = "staging" ]; then
+        staging_flag="--staging"
+        print_warning "Using STAGING mode"
+    fi
+    
+    # สร้าง domain arguments
+    local domain_args=""
+    for d in $domains; do
+        domain_args="$domain_args -d $d"
+    done
+    
+    print_info "Domains: $domains"
+    echo ""
+    
+    # Stop nginx ถ้าใช้ standalone
+    if [ -z "$webroot" ]; then
+        print_step "Stopping Nginx temporarily..."
+        docker compose -f /opt/onestack/docker-compose.yml stop nginx 2>/dev/null
+        
+        certbot certonly \
+            --standalone \
+            $staging_flag \
+            --email "$email" \
+            --agree-tos \
+            --no-eff-email \
+            $domain_args
+        
+        local result=$?
+        
+        print_step "Starting Nginx..."
+        docker compose -f /opt/onestack/docker-compose.yml start nginx
+        
+        return $result
+    else
+        # ใช้ webroot
+        certbot certonly \
+            --webroot \
+            -w "$webroot" \
+            $staging_flag \
+            --email "$email" \
+            --agree-tos \
+            --no-eff-email \
+            $domain_args
+        
+        return $?
+    fi
+}
+
+# ═══════════════════════════════════════════════════
+# Generate HTTPS Nginx Config
+# ═══════════════════════════════════════════════════
+
 generate_nginx_https_config() {
     local base_domain="$1"
     local services="$2"
-    local certbot_dir="$3"
     
-    local cert_path="/etc/letsencrypt/live/$base_domain"
-    
-    # ตรวจสอบ certificate
-    if [ ! -d "$certbot_dir/conf/live/$base_domain" ]; then
-        print_warning "Certificate directory not found: $base_domain"
-        
-        # หา certificate ที่มี
-        local first_cert=$(find "$certbot_dir/conf/live" -maxdepth 1 -type d ! -name "README" 2>/dev/null | grep -v "^$certbot_dir/conf/live$" | head -1)
-        
-        if [ -n "$first_cert" ]; then
-            local cert_name=$(basename "$first_cert")
-            cert_path="/etc/letsencrypt/live/$cert_name"
-            print_warning "Using certificate: $cert_name"
-        else
-            print_error "No certificate found!"
-            print_info "Available certificates:"
-            ls -la "$certbot_dir/conf/live/" 2>/dev/null || echo "  (none)"
-            return 1
-        fi
+    # หา certificate path ที่ถูกต้อง
+    local cert_path=""
+    if [ -d "/etc/letsencrypt/live/$base_domain" ]; then
+        cert_path="/etc/letsencrypt/live/$base_domain"
+    else
+        # ถ้าไม่มี ให้หา directory แรกที่มี
+        cert_path=$(find /etc/letsencrypt/live -maxdepth 1 -type d ! -name "README" | grep -v "^/etc/letsencrypt/live$" | head -1)
     fi
     
-    print_info "Certificate path: $cert_path"
+    if [ -z "$cert_path" ]; then
+        print_error "Cannot find SSL certificate directory"
+        return 1
+    fi
+    
+    print_info "Using certificate: $cert_path"
     
     local output_file="/opt/onestack/nginx/conf.d/https.conf"
     
     print_step "Generating HTTPS Nginx configuration..."
     
+    # สร้าง config file (ใช้ 'EOF' แทน NGINXEOF เพื่อให้ variable substitution ทำงาน)
     cat > "$output_file" << EOF
 # ═══════════════════════════════════════════════════
 # OneStack HTTPS Configuration
+# Auto-generated by SSL Manager
 # Generated: $(date)
 # Certificate: $cert_path
 # ═══════════════════════════════════════════════════
 
-# SSL Global Settings
+# SSL Parameters
 ssl_protocols TLSv1.2 TLSv1.3;
 ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
 ssl_prefer_server_ciphers off;
 ssl_session_cache shared:SSL:10m;
 ssl_session_timeout 10m;
+
+# HTTP/2
+http2 on;
 
 # Security Headers
 add_header Strict-Transport-Security "max-age=63072000" always;
@@ -466,18 +265,21 @@ add_header X-Content-Type-Options "nosniff" always;
 add_header X-XSS-Protection "1; mode=block" always;
 
 # ═══════════════════════════════════════════════════
-# Main Domain
+# Main Domain - Redirect HTTP to HTTPS
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
     server_name $base_domain www.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    return 301 https://\$host\$request_uri;
 }
 
+# ═══════════════════════════════════════════════════
+# Main Domain - HTTPS
+# ═══════════════════════════════════════════════════
+
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
     server_name $base_domain www.$base_domain;
     
     ssl_certificate $cert_path/fullchain.pem;
@@ -497,23 +299,29 @@ EOF
     for service in $services; do
         case $service in
             minio)
+                # ใช้ตัวแปร local เพื่อความชัดเจน
+                local minio_console="storage.$base_domain"
+                local minio_api="s3.$base_domain"
+                
                 cat >> "$output_file" << EOF
+
 # ═══════════════════════════════════════════════════
-# MinIO Storage
+# MinIO Object Storage
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
-    server_name storage.$base_domain s3.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    server_name $minio_console $minio_api;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name storage.$base_domain;
+    listen 443 ssl;
+    server_name $minio_console;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
+    
     client_max_body_size 100M;
     
     location / {
@@ -526,37 +334,44 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    server_name s3.$base_domain;
+    listen 443 ssl;
+    server_name $minio_api;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
+    
     client_max_body_size 100M;
     
     location / {
         proxy_pass http://minio:9000;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-
 EOF
                 ;;
                 
             parse)
+                local parse_domain="api.$base_domain"
+                
                 cat >> "$output_file" << EOF
+
 # ═══════════════════════════════════════════════════
-# Parse Server
+# Parse Server API
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
-    server_name api.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    server_name $parse_domain;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name api.$base_domain;
+    listen 443 ssl;
+    server_name $parse_domain;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
     
@@ -568,26 +383,28 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-
 EOF
                 ;;
                 
             n8n)
+                local n8n_domain="flow.$base_domain"
+                
                 cat >> "$output_file" << EOF
+
 # ═══════════════════════════════════════════════════
 # n8n Workflow Automation
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
-    server_name flow.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    server_name $n8n_domain;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name flow.$base_domain;
+    listen 443 ssl;
+    server_name $n8n_domain;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
     
@@ -597,65 +414,73 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # WebSocket support
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
     }
 }
-
 EOF
                 ;;
                 
             chatwoot)
+                local chat_domain="chat.$base_domain"
+                
                 cat >> "$output_file" << EOF
+
 # ═══════════════════════════════════════════════════
 # Chatwoot Customer Support
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
-    server_name chat.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    server_name $chat_domain;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name chat.$base_domain;
+    listen 443 ssl;
+    server_name $chat_domain;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
     
     location / {
-        proxy_pass http://chatwoot-rails:3000;
+        proxy_pass http://chatwoot:3000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # WebSocket support
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
     }
 }
-
 EOF
                 ;;
                 
             grafana)
+                local grafana_domain="monitor.$base_domain"
+                
                 cat >> "$output_file" << EOF
+
 # ═══════════════════════════════════════════════════
 # Grafana Monitoring
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
-    server_name monitor.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    server_name $grafana_domain;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name monitor.$base_domain;
+    listen 443 ssl;
+    server_name $grafana_domain;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
     
@@ -663,107 +488,111 @@ server {
         proxy_pass http://grafana:3000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-
 EOF
                 ;;
                 
+            prometheus)
+                # ลบ prometheus ออก เพราะไม่ควร expose ออกนอก
+                ;;
+                
             adminer)
+                local adminer_domain="db.$base_domain"
+                
                 cat >> "$output_file" << EOF
+
 # ═══════════════════════════════════════════════════
-# Adminer Database UI
+# Adminer Database Management
 # ═══════════════════════════════════════════════════
 
 server {
     listen 80;
-    server_name db.$base_domain;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
-    location / { return 301 https://\$host\$request_uri; }
+    server_name $adminer_domain;
+    return 301 https://\$host\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name db.$base_domain;
+    listen 443 ssl;
+    server_name $adminer_domain;
+    
     ssl_certificate $cert_path/fullchain.pem;
     ssl_certificate_key $cert_path/privkey.pem;
     
     location / {
         proxy_pass http://adminer:8080;
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-
 EOF
                 ;;
         esac
     done
     
-    print_success "✅ HTTPS configuration generated: $output_file"
-    
-    echo ""
-    print_info "Configuration includes:"
-    echo "  • Main domain: $base_domain"
-    for service in $services; do
-        case $service in
-            minio) echo "  • MinIO: storage.$base_domain, s3.$base_domain" ;;
-            parse) echo "  • Parse: api.$base_domain" ;;
-            n8n) echo "  • n8n: flow.$base_domain" ;;
-            chatwoot) echo "  • Chatwoot: chat.$base_domain" ;;
-            grafana) echo "  • Grafana: monitor.$base_domain" ;;
-            adminer) echo "  • Adminer: db.$base_domain" ;;
-        esac
-    done
+    print_success "HTTPS configuration generated: $output_file"
 }
 
+# ═══════════════════════════════════════════════════
+# Setup Auto-Renewal
+# ═══════════════════════════════════════════════════
+
 setup_auto_renewal() {
-    local certbot_dir="$1"
-    
     print_step "Setting up SSL auto-renewal..."
     
+    # สร้าง renewal script
     local renewal_script="/opt/onestack/scripts/ssl-renew.sh"
-    mkdir -p /opt/onestack/scripts /opt/onestack/logs
     
-    cat > "$renewal_script" << RENEWEOF
+    mkdir -p /opt/onestack/scripts
+    
+    cat > "$renewal_script" << 'RENEWEOF'
 #!/bin/bash
+# Auto-renewal script for SSL certificates
+
 LOG_FILE="/opt/onestack/logs/ssl-renewal.log"
-mkdir -p "\$(dirname "\$LOG_FILE")"
+mkdir -p "$(dirname "$LOG_FILE")"
 
-echo "[\$(date)] Starting SSL renewal check..." >> "\$LOG_FILE"
+echo "[$(date)] Starting SSL renewal check..." >> "$LOG_FILE"
 
-docker run --rm \\
-    -v "$certbot_dir/conf:/etc/letsencrypt" \\
-    -v "$certbot_dir/www:/var/www/certbot" \\
-    -v "$certbot_dir/logs:/var/log/letsencrypt" \\
-    certbot/certbot renew --quiet
+# Renew certificates
+certbot renew --quiet --deploy-hook "docker compose -f /opt/onestack/docker-compose.yml exec -T nginx nginx -s reload" >> "$LOG_FILE" 2>&1
 
-if [ \$? -eq 0 ]; then
-    echo "[\$(date)] SSL renewal completed successfully" >> "\$LOG_FILE"
-    docker compose -f /opt/onestack/docker-compose.yml exec -T nginx nginx -s reload
-    echo "[\$(date)] Nginx reloaded" >> "\$LOG_FILE"
+if [ $? -eq 0 ]; then
+    echo "[$(date)] SSL renewal completed successfully" >> "$LOG_FILE"
 else
-    echo "[\$(date)] SSL renewal failed!" >> "\$LOG_FILE"
+    echo "[$(date)] SSL renewal failed!" >> "$LOG_FILE"
 fi
 RENEWEOF
 
     chmod +x "$renewal_script"
     
+    # เพิ่มใน crontab (ทุกวันเวลา 2:00 และ 14:00)
     local cron_cmd="0 2,14 * * * $renewal_script"
     
+    # ตรวจสอบว่ามีอยู่แล้วหรือไม่
     if ! crontab -l 2>/dev/null | grep -q "ssl-renew.sh"; then
         (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
-        print_success "✅ Auto-renewal cron job added (runs twice daily at 2:00 and 14:00)"
+        print_success "Auto-renewal cron job added (runs twice daily)"
     else
         print_info "Auto-renewal already configured"
     fi
 }
 
+# ═══════════════════════════════════════════════════
+# Main SSL Setup Function
+# ═══════════════════════════════════════════════════
+
 setup_ssl_smart() {
     local install_dir="${1:-/opt/onestack}"
     local config_file="${2:-$install_dir/.env}"
     
-    print_header "🔒 Smart SSL Setup"
+    print_header "Smart SSL Setup"
     
+    # โหลด config
     if [ ! -f "$config_file" ]; then
         print_error "Configuration file not found: $config_file"
         return 1
@@ -771,35 +600,21 @@ setup_ssl_smart() {
     
     source "$config_file"
     
+    # ตรวจสอบ domain
     if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "localhost" ]; then
         print_error "Valid domain required for SSL setup"
-        print_info "Please set DOMAIN in $config_file"
+        print_info "Domain in .env: ${DOMAIN:-not set}"
         return 1
     fi
     
-    export CERTBOT_DIR="$install_dir/certbot"
-    
-    echo ""
-    print_info "Configuration:"
-    print_info "  Domain: $DOMAIN"
-    print_info "  Email: ${SSL_EMAIL:-admin@$DOMAIN}"
-    print_info "  Mode: ${SSL_MODE:-production}"
-    print_info "  Certbot Dir: $CERTBOT_DIR"
+    print_info "Base Domain: $DOMAIN"
+    print_info "SSL Email: ${SSL_EMAIL:-admin@$DOMAIN}"
     echo ""
     
-    # ═══════════════════════════════════════════════════
-    print_header "Step 0: ACME Challenge Setup"
-    # ═══════════════════════════════════════════════════
-    
-    if ! setup_acme_challenge "$install_dir"; then
-        print_error "ACME challenge setup failed!"
-        return 1
-    fi
-    
-    # ═══════════════════════════════════════════════════
+    # 1. Discover services
     print_header "Step 1: Service Discovery"
-    # ═══════════════════════════════════════════════════
     
+    print_step "Scanning docker-compose.yml..."
     local services=$(discover_services "$install_dir/docker-compose.yml")
     
     if [ -z "$services" ]; then
@@ -813,10 +628,10 @@ setup_ssl_smart() {
     done
     echo ""
     
-    # ═══════════════════════════════════════════════════
+    # 2. Discover domains
     print_header "Step 2: Domain Discovery"
-    # ═══════════════════════════════════════════════════
     
+    print_step "Generating domain list..."
     local all_domains=$(discover_domains "$DOMAIN" "$services")
     
     print_success "Found $(echo $all_domains | wc -w) domains:"
@@ -825,170 +640,127 @@ setup_ssl_smart() {
     done
     echo ""
     
-    # ═══════════════════════════════════════════════════
-    print_header "Step 3: DNS Verification"
-    # ═══════════════════════════════════════════════════
-    
-    local server_ip=$(curl -4 -s ifconfig.me 2>/dev/null || curl -s api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
-    print_info "Server IP: $server_ip"
-    echo ""
-    
-    print_step "Checking DNS records..."
-    local dns_ok=true
-    
-    for dom in $all_domains; do
-        local dns_ip=$(dig +short "$dom" @8.8.8.8 | tail -1)
-        if [ "$dns_ip" = "$server_ip" ]; then
-            print_success "$dom → $dns_ip ✓"
-        else
-            print_warning "$dom → ${dns_ip:-NOT FOUND} (expected: $server_ip)"
-            dns_ok=false
-        fi
-    done
-    echo ""
-    
-    if [ "$dns_ok" = false ]; then
-        print_warning "⚠️  DNS not fully configured!"
-        print_info "Some domains are not pointing to this server"
-        echo ""
-        if ! confirm "Continue anyway?"; then
-            return 1
-        fi
-    fi
-    
-    # ═══════════════════════════════════════════════════
-    print_header "Step 4: SSL Status Check"
-    # ═══════════════════════════════════════════════════
-    
+    # 3. Check existing SSL
+    print_header "Step 3: SSL Status Check"
     local missing_ssl=()
     local expiring_ssl=()
     
+    print_step "Checking SSL certificates..."
+    echo ""
+    
     for dom in $all_domains; do
-        check_existing_ssl "$dom"
-        local status=$?
-        case $status in
-            0)
-                print_success "$dom - SSL valid ✓"
-                ;;
-            2)
-                print_warning "$dom - SSL expires soon ⚠"
-                expiring_ssl+=("$dom")
-                ;;
-            1)
-                print_warning "$dom - No SSL certificate ✗"
-                missing_ssl+=("$dom")
-                ;;
-        esac
+        if check_existing_ssl "$dom"; then
+            local status=$?
+            case $status in
+                0)
+                    print_success "$dom - SSL valid"
+                    ;;
+                2)
+                    print_warning "$dom - SSL expires soon"
+                    expiring_ssl+=("$dom")
+                    ;;
+            esac
+        else
+            print_warning "$dom - No SSL certificate"
+            missing_ssl+=("$dom")
+        fi
     done
     echo ""
     
-    if [ ${#missing_ssl[@]} -gt 0 ] || [ ${#expiring_ssl[@]} -gt 0 ]; then
-        # ═══════════════════════════════════════════════════
-        print_header "Step 5: Request SSL Certificates"
-        # ═══════════════════════════════════════════════════
+    # 4. Request missing certificates
+    if [ ${#missing_ssl[@]} -gt 0 ]; then
+        print_header "Step 4: Request SSL Certificates"
         
-        local all_needed=("${missing_ssl[@]}" "${expiring_ssl[@]}")
-        
-        print_info "Domains needing certificates: ${#all_needed[@]}"
-        for dom in "${all_needed[@]}"; do
+        print_info "Missing SSL for:"
+        for dom in "${missing_ssl[@]}"; do
             echo "  • $dom"
         done
         echo ""
         
-        local ssl_email="${SSL_EMAIL:-admin@$DOMAIN}"
-        local ssl_mode="${SSL_MODE:-production}"
-        
-        # แนะนำ wildcard ถ้ามีหลาย domain
-        local use_wildcard=false
-        if [ ${#all_needed[@]} -gt 3 ]; then
-            print_info "💡 Multiple domains detected. Wildcard certificate recommended."
-            echo ""
-            if confirm "Use wildcard certificate (*.$DOMAIN)?"; then
-                use_wildcard=true
-            fi
-        fi
-        
+        print_warning "DNS Check Required!"
         echo ""
-        if [ "$use_wildcard" = true ]; then
-            request_wildcard_certificate "$DOMAIN" "$ssl_email" "$ssl_mode" "$CERTBOT_DIR"
-        else
-            local domains_str=$(IFS=' '; echo "${all_needed[*]}")
-            request_certificate_webroot "$domains_str" "$ssl_email" "$ssl_mode" "$CERTBOT_DIR"
+        echo "Make sure these DNS records point to this server:"
+        local server_ip=$(curl -s ifconfig.me 2>/dev/null)
+        echo "  Server IP: $server_ip"
+        echo ""
+        for dom in "${missing_ssl[@]}"; do
+            echo "  A    $dom  →  $server_ip"
+        done
+        echo ""
+        
+        if ! confirm "DNS configured correctly?"; then
+            print_info "Please configure DNS first"
+            return 1
         fi
+        
+        # ติดตั้ง certbot ถ้ายังไม่มี
+        if ! command -v certbot &> /dev/null; then
+            print_step "Installing certbot..."
+            apt-get update -qq
+            apt-get install -y certbot
+        fi
+        
+        # ขอ certificate
+        local ssl_mode="${SSL_MODE:-production}"
+        local ssl_email="${SSL_EMAIL:-admin@$DOMAIN}"
+        
+        # แปลง array เป็น string
+        local domains_str=$(IFS=' '; echo "${missing_ssl[*]}")
+        
+        request_certificate_http "$domains_str" "$ssl_email" "$ssl_mode" ""
         
         if [ $? -eq 0 ]; then
-            print_success "✅ SSL certificates obtained!"
+            print_success "SSL certificates obtained!"
         else
-            print_error "❌ Failed to obtain SSL certificates"
-            echo ""
-            print_info "Troubleshooting:"
-            echo "  1. Check DNS: dig +short $DOMAIN"
-            echo "  2. Check logs: cat $CERTBOT_DIR/logs/letsencrypt.log"
-            echo "  3. Verify ACME path: curl http://localhost/.well-known/acme-challenge/test"
+            print_error "Failed to obtain SSL certificates"
             return 1
         fi
     else
-        print_success "✅ All domains have valid SSL certificates"
+        print_success "All domains have valid SSL certificates"
     fi
     
-    # ═══════════════════════════════════════════════════
-    print_header "Step 6: Generate HTTPS Configuration"
-    # ═══════════════════════════════════════════════════
+    # 5. Backup and disable HTTP-only config
+    print_header "Step 5: Update Nginx Configuration"
     
-    # ปิด config เก่า
-    [ -f "$install_dir/nginx/conf.d/onestack.conf" ] && \
-        mv "$install_dir/nginx/conf.d/onestack.conf" "$install_dir/nginx/conf.d/onestack.conf.disabled"
+    # Disable old HTTP-only config to prevent conflicts
+    local http_conf="$install_dir/nginx/conf.d/onestack.conf"
+    if [ -f "$http_conf" ]; then
+        print_step "Disabling HTTP-only configuration..."
+        mv "$http_conf" "$http_conf.http-only" 2>/dev/null || true
+        print_success "HTTP-only config disabled (renamed to onestack.conf.http-only)"
+    fi
     
-    generate_nginx_https_config "$DOMAIN" "$services" "$CERTBOT_DIR"
+    # Generate HTTPS config
+    generate_nginx_https_config "$DOMAIN" "$services"
     
-    # ═══════════════════════════════════════════════════
-    print_header "Step 7: Test and Apply Configuration"
-    # ═══════════════════════════════════════════════════
-    
-    print_step "Testing nginx configuration..."
-    
-    cd "$install_dir"
-    
-    if docker compose exec -T nginx nginx -t 2>&1 | grep -q "successful"; then
-        print_success "✅ Configuration valid"
+    # Test และ reload nginx
+    print_step "Testing Nginx configuration..."
+    if docker compose -f "$install_dir/docker-compose.yml" exec -T nginx nginx -t 2>&1 | grep -q "successful"; then
+        print_success "Nginx configuration valid"
         
-        print_step "Reloading nginx..."
-        docker compose exec -T nginx nginx -s reload
-        print_success "✅ Nginx reloaded"
+        print_step "Reloading Nginx..."
+        docker compose -f "$install_dir/docker-compose.yml" exec -T nginx nginx -s reload
+        print_success "Nginx reloaded"
     else
-        print_error "❌ Configuration test failed"
-        echo ""
-        docker compose exec -T nginx nginx -t
+        print_error "Nginx configuration test failed"
         return 1
     fi
     
-    # ═══════════════════════════════════════════════════
-    print_header "Step 8: Setup Auto-Renewal"
-    # ═══════════════════════════════════════════════════
+    # 6. Setup auto-renewal
+    print_header "Step 6: Setup Auto-Renewal"
+    setup_auto_renewal
     
-    setup_auto_renewal "$CERTBOT_DIR"
-    
-    # ═══════════════════════════════════════════════════
+    # Summary
+    echo ""
     print_header "✅ SSL Setup Complete!"
-    # ═══════════════════════════════════════════════════
-    
     echo ""
     print_success "HTTPS enabled for:"
     for dom in $all_domains; do
         echo "  🔒 https://$dom"
     done
     echo ""
-    
-    print_info "Certificate Details:"
-    echo "  Location: $CERTBOT_DIR/conf/live/"
-    echo "  Auto-renewal: Enabled (twice daily at 2:00 and 14:00)"
-    echo "  Renewal logs: /opt/onestack/logs/ssl-renewal.log"
-    echo ""
-    
-    print_info "Next Steps:"
-    echo "  1. Test HTTPS: curl -I https://$DOMAIN"
-    echo "  2. Check SSL grade: https://www.ssllabs.com/ssltest/analyze.html?d=$DOMAIN"
-    echo "  3. Force HTTPS in apps (update URLs to https://)"
+    print_info "Auto-renewal: Enabled (checks twice daily)"
+    print_info "Next renewal: $(certbot renew --dry-run 2>&1 | grep "renewal" | head -1 || echo 'Run: certbot renew --dry-run')"
     echo ""
     
     return 0
