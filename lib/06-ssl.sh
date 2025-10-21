@@ -113,8 +113,8 @@ EOF
     
     print_step "Checking nginx volumes in docker-compose.yml..."
     
-    # ตรวจสอบว่ามี certbot volume หรือยัง
-    if ! grep -q "certbot/www:/var/www/certbot" "$install_dir/docker-compose.yml"; then
+    # ตรวจสอบว่ามี certbot volume หรือยัง (ตรวจสอบทั้ง bind mount และ named volume)
+    if ! grep -q "certbot.*:/var/www/certbot" "$install_dir/docker-compose.yml"; then
         print_warning "⚠️  Missing certbot volume in nginx service!"
         print_info "Adding volume automatically..."
         
@@ -190,30 +190,63 @@ EOF
         print_info "  ✓ https.conf → old"
     
     echo ""
-    print_step "Recreating nginx container..."
+    print_step "Fixing Docker overlay2 and recreating nginx..."
     
     cd "$install_dir"
     
-    # Stop และลบ container อย่างสมบูรณ์เพื่อป้องกัน read-only filesystem
+    # CRITICAL FIX: Clean overlay2 corruption
     print_info "  ► Stopping all containers..."
     docker compose stop
     sleep 2
     
-    print_info "  ► Removing old nginx container..."
-    docker rm -f onestack-nginx 2>/dev/null || true
-    sleep 1
+    print_info "  ► Stopping Docker daemon..."
+    sudo systemctl stop docker
+    sleep 3
     
-    print_info "  ► Cleaning stale mounts..."
-    docker system prune -f >/dev/null 2>&1
+    print_info "  ► Cleaning corrupted overlay2..."
+    sudo rm -rf /var/lib/docker/overlay2 2>/dev/null || true
+    sleep 2
     
-    print_info "  ► Restarting Docker daemon (fixing overlay2)..."
-    sudo systemctl restart docker
+    print_info "  ► Starting Docker daemon..."
+    sudo systemctl start docker
     sleep 10
+    
+    print_info "  ► Converting to named volume (permanent fix)..."
+    
+    # แทนที่ bind mount ด้วย named volume
+    if grep -q "./certbot/www:/var/www/certbot" docker-compose.yml; then
+        cp docker-compose.yml docker-compose.yml.pre-volume-fix
+        
+        sed -i 's|./certbot/www:/var/www/certbot:ro|certbot_www:/var/www/certbot|g' docker-compose.yml
+        
+        # เพิ่ม volume definition
+        if ! grep -q "^volumes:" docker-compose.yml; then
+            echo "" >> docker-compose.yml
+            echo "volumes:" >> docker-compose.yml
+        fi
+        
+        if ! grep -q "  certbot_www:" docker-compose.yml; then
+            sed -i '/^volumes:/a\  certbot_www:' docker-compose.yml
+        fi
+        
+        print_success "  ✓ Converted to named volume"
+    fi
+    
+    print_info "  ► Creating certbot_www volume..."
+    docker volume create certbot_www >/dev/null 2>&1 || true
+    
+    if [ -d "$install_dir/certbot/www/.well-known" ]; then
+        print_info "  ► Copying data to volume..."
+        docker run --rm \
+            -v certbot_www:/target \
+            -v "$install_dir/certbot/www:/source:ro" \
+            alpine sh -c "cp -a /source/. /target/" 2>/dev/null || true
+    fi
     
     print_info "  ► Starting all containers..."
     docker compose up -d
     
-    sleep 5
+    sleep 10
     
     # ตรวจสอบว่า nginx ทำงานหรือยัง
     if ! docker compose ps nginx 2>/dev/null | grep -q "Up"; then
@@ -228,9 +261,11 @@ EOF
     echo ""
     print_step "Testing ACME challenge path..."
     
-    # สร้างไฟล์ทดสอบ
+    # ทดสอบด้วย named volume
     local test_content="test-$(date +%s)"
-    echo "$test_content" > "$install_dir/certbot/www/.well-known/acme-challenge/test-file"
+    
+    print_info "  ► Creating test file in volume..."
+    docker run --rm -v certbot_www:/data alpine sh -c "echo '$test_content' > /data/.well-known/acme-challenge/test-file"
     
     sleep 3
     
@@ -246,7 +281,7 @@ EOF
     done
     
     # ลบไฟล์ทดสอบ
-    rm -f "$install_dir/certbot/www/.well-known/acme-challenge/test-file"
+    docker run --rm -v certbot_www:/data alpine rm -f /data/.well-known/acme-challenge/test-file
     
     if [ "$test_result" = "200" ]; then
         print_success "✅ ACME challenge path working! (HTTP $test_result)"
