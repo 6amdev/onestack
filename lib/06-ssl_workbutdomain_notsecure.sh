@@ -683,26 +683,9 @@ setup_ssl_smart() {
         local server_ip=$(curl -s ifconfig.me 2>/dev/null)
         echo "  Server IP: $server_ip"
         echo ""
-        
-        # Check if we should use wildcard
-        local use_wildcard=false
-        if [ ${#missing_ssl[@]} -gt 3 ]; then
-            print_info "Multiple subdomains detected. Wildcard certificate recommended."
-            echo ""
-            echo "Wildcard DNS requirement:"
-            echo "  A    *.$DOMAIN  →  $server_ip"
-            echo "  A    $DOMAIN    →  $server_ip"
-            echo ""
-            
-            if confirm "Use wildcard certificate (*.$DOMAIN)?"; then
-                use_wildcard=true
-            fi
-        else
-            for dom in "${missing_ssl[@]}"; do
-                echo "  A    $dom  →  $server_ip"
-            done
-        fi
-        
+        for dom in "${missing_ssl[@]}"; do
+            echo "  A    $dom  →  $server_ip"
+        done
         echo ""
         
         if ! confirm "DNS configured correctly?"; then
@@ -721,29 +704,10 @@ setup_ssl_smart() {
         local ssl_mode="${SSL_MODE:-production}"
         local ssl_email="${SSL_EMAIL:-admin@$DOMAIN}"
         
-        if [ "$use_wildcard" = true ]; then
-            print_warning "Wildcard certificates require DNS validation"
-            print_info "You'll need to add TXT records during the process"
-            echo ""
-            
-            local staging_flag=""
-            [ "$ssl_mode" = "staging" ] && staging_flag="--staging"
-            
-            certbot certonly \
-                --manual \
-                --preferred-challenges dns \
-                $staging_flag \
-                --email "$ssl_email" \
-                --agree-tos \
-                --no-eff-email \
-                -d "$DOMAIN" \
-                -d "*.$DOMAIN"
-        else
-            # แปลง array เป็น string
-            local domains_str=$(IFS=' '; echo "${missing_ssl[*]}")
-            
-            request_certificate_http "$domains_str" "$ssl_email" "$ssl_mode" ""
-        fi
+        # แปลง array เป็น string
+        local domains_str=$(IFS=' '; echo "${missing_ssl[*]}")
+        
+        request_certificate_http "$domains_str" "$ssl_email" "$ssl_mode" ""
         
         if [ $? -eq 0 ]; then
             print_success "SSL certificates obtained!"
