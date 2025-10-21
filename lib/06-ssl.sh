@@ -143,9 +143,9 @@ EOF
     [ -f "$install_dir/nginx/conf.d/https.conf" ] && \
         mv "$install_dir/nginx/conf.d/https.conf" "$install_dir/nginx/conf.d/https.conf.old" 2>/dev/null
     
-    print_step "Restarting nginx..."
+    print_step "Recreating nginx container..."
     docker compose -f "$install_dir/docker-compose.yml" down nginx 2>/dev/null
-    docker compose -f "$install_dir/docker-compose.yml" up -d nginx
+    docker compose -f "$install_dir/docker-compose.yml" up -d --force-recreate nginx
     
     sleep 3
     
