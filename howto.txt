@@ -129,3 +129,46 @@ docker compose restart nginx
 # Wait & Check
 sleep 10
 docker compose ps nginx
+
+
+# รันคำสั่งนี้ครั้งละบรรทัด
+cd /opt/onestack
+
+# สร้างโฟลเดอร์
+mkdir -p certbot/{conf,www,logs}
+
+# ออก certificate สำหรับ sixamdev.com
+docker run --rm \
+  -v $(pwd)/certbot/conf:/etc/letsencrypt \
+  -v $(pwd)/certbot/www:/var/www/certbot \
+  certbot/certbot certonly \
+  --webroot \
+  --webroot-path=/var/www/certbot \
+  --email admin@sixamdev.com \
+  --agree-tos \
+  --no-eff-email \
+  -d sixamdev.com
+
+# ออก certificate สำหรับ flow.sixamdev.com
+docker run --rm \
+  -v $(pwd)/certbot/conf:/etc/letsencrypt \
+  -v $(pwd)/certbot/www:/var/www/certbot \
+  certbot/certbot certonly \
+  --webroot \
+  --webroot-path=/var/www/certbot \
+  --email admin@sixamdev.com \
+  --agree-tos \
+  --no-eff-email \
+  -d flow.sixamdev.com
+
+# ออก certificate สำหรับ db.sixamdev.com
+docker run --rm \
+  -v $(pwd)/certbot/conf:/etc/letsencrypt \
+  -v $(pwd)/certbot/www:/var/www/certbot \
+  certbot/certbot certonly \
+  --webroot \
+  --webroot-path=/var/www/certbot \
+  --email admin@sixamdev.com \
+  --agree-tos \
+  --no-eff-email \
+  -d db.sixamdev.com

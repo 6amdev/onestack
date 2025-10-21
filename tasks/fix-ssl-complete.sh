@@ -100,27 +100,94 @@ if [ ${#MISSING_CERTS[@]} -gt 0 ] || [ ${#INVALID_CERTS[@]} -gt 0 ]; then
     echo
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Check if certbot service exists
+        if docker compose -f "$DOCKER_COMPOSE" config --services 2>/dev/null | grep -q "certbot"; then
+            CERTBOT_METHOD="docker-compose"
+        elif docker ps --format '{{.Names}}' | grep -q "certbot"; then
+            CERTBOT_METHOD="docker-exec"
+        elif command -v certbot &> /dev/null; then
+            CERTBOT_METHOD="standalone"
+        else
+            echo -e "${RED}❌ Certbot not found!${NC}"
+            echo -e "${YELLOW}Installing certbot...${NC}"
+            
+            # Install certbot via docker
+            docker pull certbot/certbot:latest
+            CERTBOT_METHOD="docker-run"
+        fi
+        
+        echo "Using certbot method: $CERTBOT_METHOD"
+        echo ""
+        
         for domain in "${ALL_PROBLEM_CERTS[@]}"; do
             echo -e "${BLUE}🔐 Requesting certificate for $domain...${NC}"
             
-            # Request certificate
-            docker compose -f "$DOCKER_COMPOSE" run --rm certbot certonly \
-                --webroot \
-                --webroot-path=/var/www/certbot \
-                --email admin@sixamdev.com \
-                --agree-tos \
-                --no-eff-email \
-                --force-renewal \
-                -d "$domain"
+            # Request certificate based on available method
+            case $CERTBOT_METHOD in
+                "docker-compose")
+                    docker compose -f "$DOCKER_COMPOSE" run --rm certbot certonly \
+                        --webroot \
+                        --webroot-path=/var/www/certbot \
+                        --email admin@sixamdev.com \
+                        --agree-tos \
+                        --no-eff-email \
+                        --force-renewal \
+                        -d "$domain"
+                    ;;
+                "docker-exec")
+                    CERTBOT_CONTAINER=$(docker ps --format '{{.Names}}' | grep certbot | head -1)
+                    docker exec "$CERTBOT_CONTAINER" certbot certonly \
+                        --webroot \
+                        --webroot-path=/var/www/certbot \
+                        --email admin@sixamdev.com \
+                        --agree-tos \
+                        --no-eff-email \
+                        --force-renewal \
+                        -d "$domain"
+                    ;;
+                "docker-run")
+                    docker run --rm \
+                        -v "$CERTBOT_DIR/conf:/etc/letsencrypt" \
+                        -v "$CERTBOT_DIR/www:/var/www/certbot" \
+                        certbot/certbot certonly \
+                        --webroot \
+                        --webroot-path=/var/www/certbot \
+                        --email admin@sixamdev.com \
+                        --agree-tos \
+                        --no-eff-email \
+                        --force-renewal \
+                        -d "$domain"
+                    ;;
+                "standalone")
+                    certbot certonly \
+                        --webroot \
+                        --webroot-path="$CERTBOT_DIR/www" \
+                        --config-dir="$CERTBOT_DIR/conf" \
+                        --work-dir="$CERTBOT_DIR/work" \
+                        --logs-dir="$CERTBOT_DIR/logs" \
+                        --email admin@sixamdev.com \
+                        --agree-tos \
+                        --no-eff-email \
+                        --force-renewal \
+                        -d "$domain"
+                    ;;
+            esac
             
             if [ $? -eq 0 ]; then
                 echo -e "${GREEN}✅ Certificate issued for $domain${NC}"
             else
                 echo -e "${RED}❌ Failed to issue certificate for $domain${NC}"
                 echo -e "${YELLOW}Please check:${NC}"
-                echo "  1. Domain DNS is pointing to this server"
+                echo "  1. Domain DNS is pointing to this server (A record)"
                 echo "  2. Port 80 is accessible from internet"
-                echo "  3. No firewall blocking HTTP"
+                echo "  3. No firewall blocking HTTP traffic"
+                echo "  4. Nginx is serving /.well-known/acme-challenge/"
+                echo ""
+                echo "To verify DNS:"
+                echo "  dig +short $domain"
+                echo ""
+                echo "To test port 80:"
+                echo "  curl -I http://$domain/.well-known/acme-challenge/test"
                 echo ""
             fi
         done
