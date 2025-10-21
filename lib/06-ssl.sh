@@ -194,17 +194,20 @@ EOF
     
     cd "$install_dir"
     
-    # CRITICAL FIX: Clean overlay2 corruption
+    # CRITICAL FIX: Complete Docker reset
     print_info "  ► Stopping all containers..."
-    docker compose stop
+    docker compose down 2>/dev/null || true
     sleep 2
     
     print_info "  ► Stopping Docker daemon..."
     sudo systemctl stop docker
+    sudo systemctl stop docker.socket
     sleep 3
     
     print_info "  ► Cleaning corrupted overlay2..."
-    sudo rm -rf /var/lib/docker/overlay2 2>/dev/null || true
+    sudo rm -rf /var/lib/docker/overlay2
+    sudo rm -rf /var/lib/docker/image
+    sudo rm -rf /var/lib/docker/containers
     sleep 2
     
     print_info "  ► Starting Docker daemon..."
@@ -232,24 +235,32 @@ EOF
         print_success "  ✓ Converted to named volume"
     fi
     
-    print_info "  ► Creating certbot_www volume..."
+    print_info "  ► Recreating volumes..."
     docker volume create certbot_www >/dev/null 2>&1 || true
+    docker volume create postgres_data >/dev/null 2>&1 || true
+    docker volume create mongodb_data >/dev/null 2>&1 || true
+    docker volume create redis_data >/dev/null 2>&1 || true
     
     if [ -d "$install_dir/certbot/www/.well-known" ]; then
-        print_info "  ► Copying data to volume..."
+        print_info "  ► Copying certbot data to volume..."
         docker run --rm \
             -v certbot_www:/target \
             -v "$install_dir/certbot/www:/source:ro" \
             alpine sh -c "cp -a /source/. /target/" 2>/dev/null || true
     fi
     
-    print_info "  ► Pulling Docker images (this may take a few minutes)..."
-    docker compose pull --quiet 2>&1 | grep -v "Pulling" || true
+    print_info "  ► Pulling Docker images..."
+    echo "     (This will take 2-5 minutes, please wait...)"
+    docker compose pull 2>&1 | while read line; do
+        if [[ "$line" =~ "Pulled" ]] || [[ "$line" =~ "Downloaded" ]]; then
+            echo "     ✓ $(echo $line | cut -d' ' -f1)"
+        fi
+    done
     
     print_info "  ► Starting all containers..."
     docker compose up -d
     
-    sleep 10
+    sleep 15
     
     # ตรวจสอบว่า nginx ทำงานหรือยัง
     if ! docker compose ps nginx 2>/dev/null | grep -q "Up"; then
