@@ -466,6 +466,7 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/logs:/var/log/nginx
       - ./frontends:/var/www:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - frontend
       - backend
