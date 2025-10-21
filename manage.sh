@@ -10,7 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/onestack"
 
 # โหลด utilities
-if [ -f "$SCRIPT_DIR/lib/utils.sh" ]; then
+if [ -f "$SCRIPT_DIR/lib/01-utils.sh" ]; then
+    source "$SCRIPT_DIR/lib/01-utils.sh"
+elif [ -f "$SCRIPT_DIR/lib/utils.sh" ]; then
     source "$SCRIPT_DIR/lib/utils.sh"
 else
     echo "Error: utils.sh not found"
@@ -161,6 +163,77 @@ setup_ssl_menu() {
         if confirm "Start SSL setup?"; then
             setup_ssl_smart "$INSTALL_DIR" "$INSTALL_DIR/.env"
         fi
+    fi
+    
+    echo ""
+    read -p "Press Enter to return to menu..."
+}
+
+# ═══════════════════════════════════════════════════
+# Add Redirect Domain
+# ═══════════════════════════════════════════════════
+
+add_redirect_domain_menu() {
+    clear
+    print_header "Add Redirect Domain"
+    
+    echo "This will redirect another domain to your main domain."
+    echo "All requests to the new domain will be forwarded to your OneStack domain."
+    echo ""
+    
+    cd "$INSTALL_DIR"
+    
+    # โหลด domain
+    if [ -f ".env" ]; then
+        source .env
+    fi
+    
+    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "localhost" ]; then
+        print_error "Main domain not configured"
+        echo ""
+        read -p "Press Enter to return to menu..."
+        return
+    fi
+    
+    print_info "Main Domain: $DOMAIN"
+    echo ""
+    
+    read -p "Enter domain to redirect (e.g., 6amdev.com): " REDIRECT_DOMAIN
+    
+    if [ -z "$REDIRECT_DOMAIN" ]; then
+        print_error "Domain cannot be empty"
+        echo ""
+        read -p "Press Enter to return to menu..."
+        return
+    fi
+    
+    # Clean domain
+    REDIRECT_DOMAIN=$(echo "$REDIRECT_DOMAIN" | sed 's|https\?://||' | sed 's|/.*||')
+    
+    echo ""
+    print_info "Redirect: $REDIRECT_DOMAIN → $DOMAIN"
+    echo ""
+    
+    if ! confirm "Continue?"; then
+        return
+    fi
+    
+    # เรียกใช้ add-redirect-domain script
+    if [ -f "$SCRIPT_DIR/tasks/add-redirect-domain.sh" ]; then
+        bash "$SCRIPT_DIR/tasks/add-redirect-domain.sh" "$REDIRECT_DOMAIN"
+    elif [ -f "$INSTALL_DIR/tasks/add-redirect-domain.sh" ]; then
+        bash "$INSTALL_DIR/tasks/add-redirect-domain.sh" "$REDIRECT_DOMAIN"
+    elif [ -f "$SCRIPT_DIR/add-redirect-domain.sh" ]; then
+        bash "$SCRIPT_DIR/add-redirect-domain.sh" "$REDIRECT_DOMAIN"
+    elif [ -f "/usr/local/bin/add-redirect-domain.sh" ]; then
+        bash /usr/local/bin/add-redirect-domain.sh "$REDIRECT_DOMAIN"
+    else
+        print_error "add-redirect-domain.sh not found"
+        print_info "Please ensure the script is in:"
+        echo "  - $SCRIPT_DIR/tasks/add-redirect-domain.sh"
+        echo "  - $INSTALL_DIR/tasks/add-redirect-domain.sh"
+        echo "  - $SCRIPT_DIR/add-redirect-domain.sh"
+        echo "  - /usr/local/bin/add-redirect-domain.sh"
     fi
     
     echo ""
@@ -353,22 +426,24 @@ show_menu() {
     echo ""
     echo "  1) Show Status"
     echo "  2) Setup/Manage SSL Certificates"
-    echo "  3) Add Service"
-    echo "  4) Service Control"
-    echo "  5) Backup System"
-    echo "  6) System Information"
-    echo "  7) Exit"
+    echo "  3) Add Redirect Domain"
+    echo "  4) Add Service"
+    echo "  5) Service Control"
+    echo "  6) Backup System"
+    echo "  7) System Information"
+    echo "  8) Exit"
     echo ""
-    read -p "Choose option [1-7]: " choice
+    read -p "Choose option [1-8]: " choice
     
     case $choice in
         1) show_status ;;
         2) setup_ssl_menu ;;
-        3) add_service_menu ;;
-        4) service_control_menu ;;
-        5) backup_menu ;;
-        6) show_system_info ;;
-        7) 
+        3) add_redirect_domain_menu ;;
+        4) add_service_menu ;;
+        5) service_control_menu ;;
+        6) backup_menu ;;
+        7) show_system_info ;;
+        8) 
             clear
             print_success "Goodbye!"
             exit 0
