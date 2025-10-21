@@ -101,3 +101,19 @@ Thumbs.db
 ✅ .gitignore - ป้องกัน commit ข้อมูลสำคัญ
 
 sudo cat /opt/onestack/.credentials
+
+
+
+# หยุด Nginx ในเครื่อง
+sudo systemctl stop nginx
+
+# ปิด auto-start
+sudo systemctl disable nginx
+
+# Start Docker Nginx
+cd /opt/onestack
+docker compose up -d
+
+# Check
+docker compose ps
+curl -I http://localhost
