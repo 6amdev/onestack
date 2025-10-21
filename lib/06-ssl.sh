@@ -193,8 +193,21 @@ EOF
     print_step "Recreating nginx container..."
     
     cd "$install_dir"
-    docker compose down nginx 2>/dev/null
-    docker compose up -d --force-recreate nginx
+    
+    # Stop และลบ container อย่างสมบูรณ์เพื่อป้องกัน read-only filesystem
+    print_info "  ► Stopping nginx gracefully..."
+    docker compose stop nginx
+    sleep 2
+    
+    print_info "  ► Removing old container..."
+    docker rm -f onestack-nginx 2>/dev/null || true
+    sleep 1
+    
+    print_info "  ► Cleaning stale mounts..."
+    docker system prune -f >/dev/null 2>&1
+    
+    print_info "  ► Starting nginx with new volumes..."
+    docker compose up -d nginx
     
     sleep 5
     
