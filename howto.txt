@@ -117,3 +117,15 @@ docker compose up -d
 # Check
 docker compose ps
 curl -I http://localhost
+
+
+
+# เพิ่ม resolver
+sudo sed -i '1i resolver 127.0.0.11 valid=30s;' /opt/onestack/nginx/conf.d/https.conf
+
+# Restart
+docker compose restart nginx
+
+# Wait & Check
+sleep 10
+docker compose ps nginx

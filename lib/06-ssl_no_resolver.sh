@@ -248,9 +248,6 @@ generate_nginx_https_config() {
 # Certificate: $cert_path
 # ═══════════════════════════════════════════════════
 
-# DNS Resolver for Docker containers
-resolver 127.0.0.11 valid=30s;
-
 # SSL Parameters
 ssl_protocols TLSv1.2 TLSv1.3;
 ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
@@ -450,7 +447,7 @@ server {
     ssl_certificate_key $cert_path/privkey.pem;
     
     location / {
-        proxy_pass http://chatwoot-rails:3000;
+        proxy_pass http://chatwoot:3000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -683,16 +680,7 @@ setup_ssl_smart() {
         print_warning "DNS Check Required!"
         echo ""
         echo "Make sure these DNS records point to this server:"
-        
-        # ดึง IPv4 โดยเฉพาะ
-        local server_ip=$(curl -4 -s ifconfig.me 2>/dev/null)
-        if [ -z "$server_ip" ]; then
-            server_ip=$(curl -s api.ipify.org 2>/dev/null)
-        fi
-        if [ -z "$server_ip" ]; then
-            server_ip=$(hostname -I | awk '{print $1}')
-        fi
-        
+        local server_ip=$(curl -s ifconfig.me 2>/dev/null)
         echo "  Server IP: $server_ip"
         echo ""
         
