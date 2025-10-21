@@ -87,13 +87,20 @@ check_existing_ssl() {
     local domain="$1"
     local cert_dir="/etc/letsencrypt/live"
     
+    # ตรวจสอบว่ามี directory และไฟล์ cert
     if [ -d "$cert_dir/$domain" ] && [ -f "$cert_dir/$domain/fullchain.pem" ]; then
         # ตรวจสอบวันหมดอายุ
         local expiry=$(openssl x509 -in "$cert_dir/$domain/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2)
         
         if [ -n "$expiry" ]; then
-            local expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null)
+            local expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo "0")
             local now_epoch=$(date +%s)
+            
+            # ถ้า parse date ไม่ได้ ให้ถือว่ามี cert
+            if [ "$expiry_epoch" = "0" ]; then
+                return 0
+            fi
+            
             local days_left=$(( ($expiry_epoch - $now_epoch) / 86400 ))
             
             if [ $days_left -gt 30 ]; then
@@ -600,21 +607,25 @@ setup_ssl_smart() {
     local missing_ssl=()
     local expiring_ssl=()
     
+    print_step "Checking SSL certificates..."
+    echo ""
+    
     for dom in $all_domains; do
-        check_existing_ssl "$dom"
-        case $? in
-            0)
-                print_success "$dom - SSL valid"
-                ;;
-            1)
-                print_warning "$dom - No SSL certificate"
-                missing_ssl+=("$dom")
-                ;;
-            2)
-                print_warning "$dom - SSL expires soon"
-                expiring_ssl+=("$dom")
-                ;;
-        esac
+        if check_existing_ssl "$dom"; then
+            local status=$?
+            case $status in
+                0)
+                    print_success "$dom - SSL valid"
+                    ;;
+                2)
+                    print_warning "$dom - SSL expires soon"
+                    expiring_ssl+=("$dom")
+                    ;;
+            esac
+        else
+            print_warning "$dom - No SSL certificate"
+            missing_ssl+=("$dom")
+        fi
     done
     echo ""
     
